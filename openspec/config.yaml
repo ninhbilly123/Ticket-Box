@@ -1,0 +1,7 @@
+project:
+  name: TicketBox
+  description: Hệ thống bán vé concert trực tuyến
+
+specs:
+  output_dir: openspec/specs
+  template: .github/prompts/spec-template.md
