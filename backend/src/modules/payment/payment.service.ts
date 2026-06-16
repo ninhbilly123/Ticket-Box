@@ -1,6 +1,8 @@
 import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
+import { generateQrToken } from '../../shared/lib/crypto';
+import { emailQueue } from '../../workers/email.worker';
 
 export class PaymentService {
   /**
@@ -160,12 +162,39 @@ export class PaymentService {
           data: { status: 'PAID' },
         });
 
-        await tx.ticket.updateMany({
-          where: { orderId: payment.orderId },
-          data: { status: 'BOOKED' },
-        });
+        const ticketsToUpdate = payment.order.tickets;
+        for (const ticket of ticketsToUpdate) {
+          const qrToken = generateQrToken(ticket.id);
+          await tx.ticket.update({
+            where: { id: ticket.id },
+            data: { 
+              status: 'BOOKED',
+              qrToken 
+            },
+          });
+        }
 
-        console.log(`[Payment Webhook] Order ${payment.orderId} marked as PAID. Tickets created.`);
+        console.log(`[Payment Webhook] Order ${payment.orderId} marked as PAID. Tickets created with QR tokens.`);
+        
+        // Enqueue email job
+        try {
+          // Add job to background queue for email sending
+          // In a real app we'd fetch the user's actual email
+          const mockEmail = `user_${payment.order.userId}@example.com`;
+          await emailQueue.add('sendTicketEmail', {
+            email: mockEmail,
+            orderId: payment.orderId,
+            tickets: ticketsToUpdate.map(t => ({
+              id: t.id,
+              seatNumber: t.seatNumber,
+              qrToken: generateQrToken(t.id),
+              ticketType: { name: 'Vé tiêu chuẩn' } // Mock ticket type name for email
+            }))
+          });
+          console.log(`[Payment Webhook] Queued email job for order ${payment.orderId}`);
+        } catch (e: any) {
+          console.error(`[Payment Webhook] Failed to queue email job: ${e.message}`);
+        }
       } else {
         // Failed payment: transition order to CANCELLED and delete hold tickets to release seats
         await tx.order.update({
@@ -183,8 +212,18 @@ export class PaymentService {
         console.log(`[Payment Webhook] Order ${payment.orderId} marked as CANCELLED. Held seats deleted.`);
       }
 
-      // 4. Invalidate Redis Cache for each affected ticket type
+      // 4. Clear Redis Locks and Invalidate Cache
       const ticketTypeIds = Array.from(new Set(payment.order.tickets.map((t) => t.ticketTypeId)));
+      const { unlockTicket } = require('../../shared/lib/redis');
+      
+      for (const ticket of payment.order.tickets) {
+        try {
+          await unlockTicket(ticket.id);
+        } catch (e) {
+          console.error(`[Payment Webhook] Failed to unlock ticket ${ticket.id}:`, e);
+        }
+      }
+
       for (const ttId of ticketTypeIds) {
         const cacheKey = `ticket_inventory:${ttId}`;
         try {

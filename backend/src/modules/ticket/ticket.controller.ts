@@ -47,4 +47,18 @@ export class TicketController {
       next(err);
     }
   }
+
+  public async scanTicket(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { qrToken } = req.body;
+      const result = await ticketService.scanTicket(qrToken);
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
 }

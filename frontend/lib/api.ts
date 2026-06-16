@@ -7,6 +7,8 @@ export interface TicketType {
   totalQuantity: number;
   maxLimitPerUser: number;
   remaining: number;
+  reserved: number;
+  booked: number;
 }
 
 export interface Concert {
@@ -70,6 +72,7 @@ export interface BookTicketsResponse {
     status: 'RESERVED' | 'BOOKED' | 'REFUNDED';
     createdAt: string;
   }>;
+  expiredAt?: string;
 }
 
 export async function bookTickets(params: {

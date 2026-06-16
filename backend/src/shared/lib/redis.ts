@@ -20,4 +20,29 @@ redisClient.on('connect', () => console.log('Redis Client Connected'));
   }
 })();
 
+export const lockTicket = async (ticketId: string, orderId: string, expiresInSeconds: number = 600) => {
+  const lockKey = `ticket:${ticketId}:lock`;
+  // SET key value EX seconds NX (only if it does not exist)
+  const result = await redisClient.set(lockKey, orderId, {
+    EX: expiresInSeconds,
+    NX: true
+  });
+  return result === 'OK';
+};
+
+export const unlockTicket = async (ticketId: string) => {
+  const lockKey = `ticket:${ticketId}:lock`;
+  await redisClient.del(lockKey);
+};
+
+export const getLockedTickets = async (ticketIds: string[]) => {
+  // Check multiple tickets using mGet or pipeline
+  if (ticketIds.length === 0) return [];
+  const keys = ticketIds.map(id => `ticket:${id}:lock`);
+  const results = await redisClient.mGet(keys);
+  
+  // Return the ticketIds that are locked (result is not null)
+  return ticketIds.filter((_, index) => results[index] !== null);
+};
+
 export default redisClient;

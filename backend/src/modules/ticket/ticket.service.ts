@@ -1,6 +1,7 @@
 import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
+import { verifyQrToken } from '../../shared/lib/crypto';
 
 export class TicketService {
   /**
@@ -113,9 +114,22 @@ export class TicketService {
         console.error(`[Redis Cache Invalidation Error] Failed to delete key ${cacheKey}:`, err);
       }
 
+      // 7. Lock tickets in Redis
+      const { lockTicket } = require('../../shared/lib/redis');
+      for (const t of tickets) {
+        await lockTicket(t.id, order.id, 600);
+      }
+
+      // 8. Schedule Timeout Job
+      const { reservationQueue } = require('../../workers/reservation.worker');
+      await reservationQueue.add('timeout', { orderId: order.id }, { delay: 600000 });
+
+      const expiredAt = new Date(Date.now() + 600 * 1000);
+
       return {
         order,
         tickets,
+        expiredAt
       };
     });
   }
@@ -132,5 +146,48 @@ export class TicketService {
       throw new AppError(404, 'ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng.');
     }
     return order;
+  }
+
+  /**
+   * Scan and validate a ticket using its QR token
+   */
+  public async scanTicket(qrToken: string) {
+    if (!qrToken) {
+      throw new AppError(400, 'BAD_REQUEST', 'Vui lòng cung cấp mã QR (qrToken).');
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { qrToken },
+      include: { order: true, ticketType: true }
+    });
+
+    if (!ticket) {
+      throw new AppError(404, 'INVALID_TICKET', 'Vé không hợp lệ hoặc không tồn tại trong hệ thống.');
+    }
+
+    if (!verifyQrToken(ticket.id, qrToken)) {
+      throw new AppError(400, 'INVALID_TICKET', 'Mã QR không hợp lệ hoặc đã bị làm giả.');
+    }
+
+    if (ticket.status !== 'BOOKED') {
+      throw new AppError(400, 'INVALID_STATUS', 'Vé chưa được thanh toán thành công hoặc đã bị hủy.');
+    }
+
+    if (ticket.isCheckedIn) {
+      throw new AppError(400, 'ALREADY_CHECKED_IN', 'Vé này đã được sử dụng (check-in) trước đó.');
+    }
+
+    // Update ticket
+    const updatedTicket = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { isCheckedIn: true }
+    });
+
+    return {
+      id: updatedTicket.id,
+      seatNumber: updatedTicket.seatNumber,
+      ticketType: ticket.ticketType.name,
+      checkedInAt: new Date(),
+    };
   }
 }

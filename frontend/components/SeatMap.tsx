@@ -94,7 +94,8 @@ export default function SeatMap({
           {/* Zones */}
           {zones.map((zone) => {
             const tt = findTicketTypeByName(zone.name);
-            const isSoldOut = tt ? tt.remaining === 0 : true;
+            const isSoldOut = tt ? tt.remaining === 0 && tt.reserved === 0 : true;
+            const isFullyReserved = tt ? tt.remaining === 0 && tt.reserved > 0 : false;
             const isSelected = tt ? selectedTicketTypeId === tt.id : false;
 
             // Define points/dimensions for SVG shapes
@@ -136,13 +137,15 @@ export default function SeatMap({
             const className = `transition-all duration-300 cursor-pointer ${
               isSoldOut
                 ? zone.disabledColor
+                : isFullyReserved
+                ? 'fill-amber-700/50 stroke-amber-500 stroke-1 cursor-wait'
                 : isSelected
                 ? zone.selectedColor
                 : zone.color
             }`;
 
             const handleClick = () => {
-              if (tt && !isSoldOut) {
+              if (tt && !isSoldOut && !isFullyReserved) {
                 onSelectTicketType(tt.id);
               }
             };
@@ -155,10 +158,10 @@ export default function SeatMap({
                 {/* Zone Label Text */}
                 <text
                   x={textCoords.x}
-                  y={textCoords.y}
+                  y={textCoords.y - 4}
                   textAnchor="middle"
                   className={`pointer-events-none font-bold text-[10px] ${
-                    isSoldOut ? 'fill-gray-500' : zone.textColor
+                    isSoldOut || isFullyReserved ? 'fill-gray-400' : zone.textColor
                   }`}
                 >
                   {zone.label}
@@ -168,13 +171,23 @@ export default function SeatMap({
                 {tt && (
                   <text
                     x={textCoords.x}
-                    y={textCoords.y + 12}
+                    y={textCoords.y + 8}
                     textAnchor="middle"
                     className={`pointer-events-none text-[8px] ${
-                      isSoldOut ? 'fill-gray-500' : 'fill-white/80'
+                      isSoldOut || isFullyReserved ? 'fill-gray-400' : 'fill-white/90'
                     }`}
                   >
-                    {isSoldOut ? 'Hết vé' : `Còn: ${tt.remaining}`}
+                    {isSoldOut ? 'Hết vé' : isFullyReserved ? 'Đang giữ chỗ...' : `Còn: ${tt.remaining}`}
+                  </text>
+                )}
+                {tt && tt.reserved > 0 && !isSoldOut && !isFullyReserved && (
+                  <text
+                    x={textCoords.x}
+                    y={textCoords.y + 18}
+                    textAnchor="middle"
+                    className="pointer-events-none text-[7px] fill-amber-300/80"
+                  >
+                    (Đang giữ: {tt.reserved})
                   </text>
                 )}
               </g>
@@ -204,6 +217,10 @@ export default function SeatMap({
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded bg-emerald-500"></span>
           <span>GA</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-amber-700 opacity-50 border border-amber-500"></span>
+          <span>Đang giữ chỗ</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded bg-gray-700 opacity-40 border border-gray-600"></span>

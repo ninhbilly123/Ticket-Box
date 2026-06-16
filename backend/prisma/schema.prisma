@@ -89,6 +89,8 @@ model Ticket {
   ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
   seatNumber   String?      @map("seat_number") // Mã ghế cụ thể (nếu có, e.g. A12)
   status       TicketStatus @default(RESERVED) // RESERVED, BOOKED, REFUNDED
+  qrToken      String?      @unique @map("qr_token") // Mã định danh E-ticket
+  isCheckedIn  Boolean      @default(false) @map("is_checked_in") // Trạng thái soát vé
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 

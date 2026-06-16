@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { Calendar, MapPin, Music, User, ShoppingCart, ArrowLeft, RefreshCw, CheckCircle2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { Concert, fetchConcertById, bookTickets, BookTicketsResponse, initiatePayment, fetchOrderById } from '../../../../lib/api';
 import SeatMap from '../../../../components/SeatMap';
+import CountdownTimer from '../../../../components/CountdownTimer';
 
 export default function ConcertDetailPage() {
   const params = useParams();
@@ -398,6 +399,24 @@ export default function ConcertDetailPage() {
                         <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
                         Đơn hàng đang chờ thanh toán...
                       </div>
+                      
+                      {bookingSuccess.expiredAt && (
+                        <div className="bg-yellow-950/30 border border-yellow-900/50 p-3 rounded-lg text-center">
+                          <p className="text-yellow-500 text-xs mb-1">Thời gian thanh toán còn lại</p>
+                          <CountdownTimer 
+                            expiredAt={bookingSuccess.expiredAt} 
+                            onExpire={() => {
+                              // Auto reload or simulate cancellation
+                              setBookingSuccess(prev => prev ? {
+                                ...prev,
+                                order: { ...prev.order, status: 'CANCELLED' }
+                              } : null);
+                              setPaymentUrl(null);
+                            }} 
+                          />
+                        </div>
+                      )}
+
                       <p className="text-slate-400 text-[11px]">
                         Một yêu cầu giữ chỗ đã được thiết lập. Vui lòng hoàn tất thanh toán trong <strong>10 phút</strong> để tránh bị tự động hủy và giải phóng ghế.
                       </p>

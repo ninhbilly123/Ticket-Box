@@ -6,44 +6,42 @@ export class ConcertService {
   /**
    * Helper to retrieve remaining tickets for a ticket type with Redis Cache-aside (TTL 30s)
    */
-  public async getRemainingTickets(ticketTypeId: string, totalQuantity: number): Promise<number> {
-    const cacheKey = `ticket_inventory:${ticketTypeId}`;
+  public async getRemainingTickets(ticketTypeId: string, totalQuantity: number): Promise<{ remaining: number, reserved: number, booked: number }> {
+    const cacheKey = `ticket_inventory_detailed:${ticketTypeId}`;
     
     try {
-      // 1. Check Redis Cache
       if (redisClient.isOpen) {
         const cached = await redisClient.get(cacheKey);
         if (cached !== null) {
-          return parseInt(cached, 10);
+          return JSON.parse(cached);
         }
       }
     } catch (err) {
       console.error(`[Redis Error] Failed to read cache for ${ticketTypeId}:`, err);
     }
 
-    // 2. Cache Miss: Query PostgreSQL
-    // Tickets with status RESERVED (temporary hold) or BOOKED (paid) are considered sold/unavailable.
-    const soldCount = await prisma.ticket.count({
-      where: {
-        ticketTypeId,
-        status: {
-          in: ['RESERVED', 'BOOKED'],
-        },
-      },
+    const reservedCount = await prisma.ticket.count({
+      where: { ticketTypeId, status: 'RESERVED' },
+    });
+    
+    const bookedCount = await prisma.ticket.count({
+      where: { ticketTypeId, status: 'BOOKED' },
     });
 
+    const soldCount = reservedCount + bookedCount;
     const remaining = Math.max(0, totalQuantity - soldCount);
+    
+    const result = { remaining, reserved: reservedCount, booked: bookedCount };
 
     try {
-      // 3. Write back to Redis cache with 30 seconds TTL
       if (redisClient.isOpen) {
-        await redisClient.setEx(cacheKey, 30, remaining.toString());
+        await redisClient.setEx(cacheKey, 30, JSON.stringify(result));
       }
     } catch (err) {
       console.error(`[Redis Error] Failed to set cache for ${ticketTypeId}:`, err);
     }
 
-    return remaining;
+    return result;
   }
 
   /**
@@ -109,14 +107,16 @@ export class ConcertService {
       concerts.map(async (concert) => {
         const ticketTypesWithRemaining = await Promise.all(
           concert.ticketTypes.map(async (tt) => {
-            const remaining = await this.getRemainingTickets(tt.id, tt.totalQuantity);
+            const counts = await this.getRemainingTickets(tt.id, tt.totalQuantity);
             return {
               id: tt.id,
               name: tt.name,
               price: tt.price,
               totalQuantity: tt.totalQuantity,
               maxLimitPerUser: tt.maxLimitPerUser,
-              remaining,
+              remaining: counts.remaining,
+              reserved: counts.reserved,
+              booked: counts.booked,
             };
           })
         );
@@ -154,14 +154,16 @@ export class ConcertService {
 
     const ticketTypesWithRemaining = await Promise.all(
       concert.ticketTypes.map(async (tt) => {
-        const remaining = await this.getRemainingTickets(tt.id, tt.totalQuantity);
+        const counts = await this.getRemainingTickets(tt.id, tt.totalQuantity);
         return {
           id: tt.id,
           name: tt.name,
           price: tt.price,
           totalQuantity: tt.totalQuantity,
           maxLimitPerUser: tt.maxLimitPerUser,
-          remaining,
+          remaining: counts.remaining,
+          reserved: counts.reserved,
+          booked: counts.booked,
         };
       })
     );
