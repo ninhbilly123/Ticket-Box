@@ -1,0 +1,104 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Concert {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  artist      String
+  dateTime    DateTime     @map("date_time")
+  location    String
+  seatMapUrl  String       @map("seat_map_url") // Đường dẫn tới file SVG sơ đồ chỗ ngồi
+  ticketTypes TicketType[]
+  orders      Order[]
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@map("concerts")
+}
+
+model TicketType {
+  id              String   @id @default(uuid())
+  concertId       String   @map("concert_id")
+  concert         Concert  @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  name            String   // GA, SVIP, VIP, CAT1, CAT2...
+  price           Decimal  @db.Decimal(12, 2)
+  totalQuantity   Int      @map("total_quantity") // Tổng số vé phát hành của hạng này
+  maxLimitPerUser Int      @map("max_limit_per_user") // Số vé tối đa 1 user được phép mua thành công
+  tickets         Ticket[]
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("ticket_types")
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  userId         String      @map("user_id") // Liên kết tới tài khoản người dùng
+  concertId      String      @map("concert_id")
+  concert        Concert     @relation(fields: [concertId], references: [id])
+  totalAmount    Decimal     @db.Decimal(12, 2) @map("total_amount")
+  status         OrderStatus @default(PENDING) // PENDING, PAID, CANCELLED
+  idempotencyKey String?     @unique @map("idempotency_key")
+  tickets        Ticket[]
+  payments       Payment[]
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+model Payment {
+  id             String        @id @default(uuid())
+  orderId        String        @map("order_id")
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentGateway String        @map("payment_gateway") // VNPAY, MOMO
+  amount         Decimal       @db.Decimal(12, 2)
+  status         PaymentStatus @default(PENDING) // PENDING, SUCCESS, FAILED
+  transactionId  String?       @map("transaction_id") // Mã giao dịch của cổng thanh toán
+  responseCode   String?       @map("response_code") // Mã phản hồi chi tiết từ đối tác
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Ticket {
+  id           String       @id @default(uuid())
+  orderId      String       @map("order_id")
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTypeId String       @map("ticket_type_id")
+  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
+  seatNumber   String?      @map("seat_number") // Mã ghế cụ thể (nếu có, e.g. A12)
+  status       TicketStatus @default(RESERVED) // RESERVED, BOOKED, REFUNDED
+  qrToken      String?      @unique @map("qr_token") // Mã định danh E-ticket
+  isCheckedIn  Boolean      @default(false) @map("is_checked_in") // Trạng thái soát vé
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@map("tickets")
+}
+
+enum TicketStatus {
+  RESERVED
+  BOOKED
+  REFUNDED
+}
