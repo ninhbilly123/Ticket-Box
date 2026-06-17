@@ -18,7 +18,11 @@ export async function cleanupExpiredOrders() {
         },
       },
       include: {
-        tickets: true,
+        orderItems: {
+          include: {
+            tickets: true,
+          },
+        },
       },
     });
 
@@ -38,14 +42,15 @@ export async function cleanupExpiredOrders() {
 
         await tx.ticket.deleteMany({
           where: {
-            orderId: order.id,
-            status: 'RESERVED',
+            orderItem: {
+              orderId: order.id,
+            },
           },
         });
       });
 
       // 3. Invalidate Redis inventory cache for affected ticket types
-      const ticketTypeIds = Array.from(new Set(order.tickets.map((t) => t.ticketTypeId)));
+      const ticketTypeIds = Array.from(new Set(order.orderItems.map((item) => item.ticketTypeId)));
       for (const ttId of ticketTypeIds) {
         const cacheKey = `ticket_inventory:${ttId}`;
         try {

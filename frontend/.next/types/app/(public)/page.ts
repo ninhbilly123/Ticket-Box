@@ -1,4 +1,4 @@
-// File: N:\DESIGN SYSTEM\DOAN\Ticket-Box-\frontend\app\(public)\page.tsx
+// File: E:\Desktop\Ticket_Box\Ticket-Box-\frontend\app\(public)\page.tsx
 import * as entry from '../../../../app/(public)/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

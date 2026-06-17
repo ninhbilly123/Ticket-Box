@@ -1,4 +1,13 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    // Client-side: tự động lấy IP/hostname của máy tính chạy backend
+    return `http://${window.location.hostname}:3000/api/v1`;
+  }
+  // Server-side (Next.js SSR/build)
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface TicketType {
   id: string;
@@ -137,3 +146,134 @@ export async function initiatePayment(params: {
   }
   return json.data;
 }
+
+// === CHECK-IN API INTEGRATION ===
+
+export interface ScanResult {
+  status: 'VALID' | 'ALREADY_USED' | 'INVALID_TICKET' | 'WRONG_CONCERT' | 'WRONG_DATE';
+  checkedInAt?: string;
+  deviceId?: string;
+  ticket?: {
+    id: string;
+    seatNumber: string | null;
+    ticketType: string;
+    usedAt: string;
+  };
+}
+
+export interface SyncResult {
+  syncedCount: number;
+  conflictCount: number;
+  conflicts: Array<{
+    ticketId: string;
+    scannedAtLocal: string;
+    reason: string;
+  }>;
+}
+
+export interface VipGuestDetail {
+  id: string;
+  fullName: string;
+  identifier: string;
+  zone: string;
+  ticketDetails: {
+    ticketId: string;
+    ticketType: string;
+    status: string;
+    checkedIn: boolean;
+    checkedInAt: string | null;
+  } | null;
+}
+
+export interface CheckinStats {
+  totalTickets: number;
+  checkedInTickets: number;
+  percent: number;
+  byTicketType: Record<string, {
+    total: number;
+    checkedIn: number;
+    percent: number;
+  }>;
+}
+
+export async function scanTicket(params: {
+  ticketId: string;
+  deviceId: string;
+  scannedAtLocal: string;
+  concertId: string;
+  gateStaffId?: string;
+}): Promise<ScanResult> {
+  const res = await fetch(`${API_BASE_URL}/checkins/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error?.message || 'Lỗi khi soát vé');
+  }
+  return json.data;
+}
+
+export async function syncOfflineLogs(params: {
+  deviceId: string;
+  logs: Array<{ ticketId: string; scannedAtLocal: string }>;
+  gateStaffId?: string;
+}): Promise<SyncResult> {
+  const res = await fetch(`${API_BASE_URL}/checkins/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error?.message || 'Lỗi khi đồng bộ dữ liệu');
+  }
+  return json.data;
+}
+
+export async function fetchVipGuests(concertId: string, query: string = ''): Promise<VipGuestDetail[]> {
+  const queryParams = new URLSearchParams({ concertId });
+  if (query) queryParams.append('query', query);
+  
+  const res = await fetch(`${API_BASE_URL}/checkins/vip-guests?${queryParams.toString()}`, {
+    cache: 'no-store',
+  });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error?.message || 'Lỗi khi lấy danh sách khách VIP');
+  }
+  return json.data;
+}
+
+export async function checkinVipGuest(params: {
+  vipGuestId: string;
+  deviceId: string;
+  gateStaffId?: string;
+}): Promise<ScanResult> {
+  const res = await fetch(`${API_BASE_URL}/checkins/vip-guests/${params.vipGuestId}/checkin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deviceId: params.deviceId,
+      gateStaffId: params.gateStaffId,
+    }),
+  });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error?.message || 'Lỗi khi soát vé khách VIP');
+  }
+  return json.data;
+}
+
+export async function fetchCheckinStats(concertId: string): Promise<CheckinStats> {
+  const res = await fetch(`${API_BASE_URL}/checkins/stats/${concertId}`, {
+    cache: 'no-store',
+  });
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.error?.message || 'Lỗi khi lấy dữ liệu thống kê');
+  }
+  return json.data;
+}
+

@@ -22,12 +22,14 @@ export class ConcertService {
     }
 
     // 2. Cache Miss: Query PostgreSQL
-    // Tickets with status RESERVED (temporary hold) or BOOKED (paid) are considered sold/unavailable.
+    // Tickets with status valid or used are considered sold/unavailable.
     const soldCount = await prisma.ticket.count({
       where: {
-        ticketTypeId,
+        orderItem: {
+          ticketTypeId,
+        },
         status: {
-          in: ['RESERVED', 'BOOKED'],
+          in: ['valid', 'used'],
         },
       },
     });
@@ -58,27 +60,44 @@ export class ConcertService {
     const { search, artist, date, location } = filters;
     const whereClause: any = {};
 
-    // Filter upcoming concerts
-    whereClause.dateTime = {
-      gte: new Date(),
+    // Filter upcoming concerts (today and future)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    whereClause.startAt = {
+      gte: todayStart,
     };
 
-    // Apply search string (matches title or artist name)
+    // Apply search string (matches name, venue, or artist name)
     if (search) {
       whereClause.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { artist: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { venue: { contains: search, mode: 'insensitive' } },
+        {
+          artists: {
+            some: {
+              artist: {
+                name: { contains: search, mode: 'insensitive' }
+              }
+            }
+          }
+        }
       ];
     }
 
     // Filter by specific artist
     if (artist) {
-      whereClause.artist = { contains: artist, mode: 'insensitive' };
+      whereClause.artists = {
+        some: {
+          artist: {
+            name: { contains: artist, mode: 'insensitive' }
+          }
+        }
+      };
     }
 
-    // Filter by specific location
+    // Filter by specific location/venue
     if (location) {
-      whereClause.location = { contains: location, mode: 'insensitive' };
+      whereClause.venue = { contains: location, mode: 'insensitive' };
     }
 
     // Filter by specific date
@@ -87,7 +106,7 @@ export class ConcertService {
       if (!isNaN(parsedDate.getTime())) {
         const startOfDay = new Date(parsedDate.setUTCHours(0, 0, 0, 0));
         const endOfDay = new Date(parsedDate.setUTCHours(23, 59, 59, 999));
-        whereClause.dateTime = {
+        whereClause.startAt = {
           gte: startOfDay,
           lte: endOfDay,
         };
@@ -98,9 +117,14 @@ export class ConcertService {
       where: whereClause,
       include: {
         ticketTypes: true,
+        artists: {
+          include: {
+            artist: true,
+          },
+        },
       },
       orderBy: {
-        dateTime: 'asc',
+        startAt: 'asc',
       },
     });
 
@@ -113,22 +137,24 @@ export class ConcertService {
             return {
               id: tt.id,
               name: tt.name,
-              price: tt.price,
+              price: Number(tt.price),
               totalQuantity: tt.totalQuantity,
-              maxLimitPerUser: tt.maxLimitPerUser,
+              maxLimitPerUser: tt.maxPerAccount,
               remaining,
             };
           })
         );
 
+        const artistNames = concert.artists.map((ca) => ca.artist.name).join(', ');
+
         return {
           id: concert.id,
-          title: concert.title,
+          title: concert.name,
           description: concert.description,
-          artist: concert.artist,
-          dateTime: concert.dateTime,
-          location: concert.location,
-          seatMapUrl: concert.seatMapUrl,
+          artist: artistNames || 'Nhiều nghệ sĩ',
+          dateTime: concert.startAt.toISOString(),
+          location: concert.venue,
+          seatMapUrl: concert.svgSeatingMap || '',
           ticketTypes: ticketTypesWithRemaining,
         };
       })
@@ -145,6 +171,11 @@ export class ConcertService {
       where: { id },
       include: {
         ticketTypes: true,
+        artists: {
+          include: {
+            artist: true,
+          },
+        },
       },
     });
 
@@ -158,23 +189,26 @@ export class ConcertService {
         return {
           id: tt.id,
           name: tt.name,
-          price: tt.price,
+          price: Number(tt.price),
           totalQuantity: tt.totalQuantity,
-          maxLimitPerUser: tt.maxLimitPerUser,
+          maxLimitPerUser: tt.maxPerAccount,
           remaining,
         };
       })
     );
 
+    const artistNames = concert.artists.map((ca) => ca.artist.name).join(', ');
+
     return {
       id: concert.id,
-      title: concert.title,
+      title: concert.name,
       description: concert.description,
-      artist: concert.artist,
-      dateTime: concert.dateTime,
-      location: concert.location,
-      seatMapUrl: concert.seatMapUrl,
+      artist: artistNames || 'Nhiều nghệ sĩ',
+      dateTime: concert.startAt.toISOString(),
+      location: concert.venue,
+      seatMapUrl: concert.svgSeatingMap || '',
       ticketTypes: ticketTypesWithRemaining,
     };
   }
 }
+export default ConcertService;

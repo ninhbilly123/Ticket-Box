@@ -92,21 +92,11 @@ export class PaymentService {
     // API call success -> reset breaker
     await this.recordSuccess(gateway);
 
-    // 2. Create the PENDING payment record
-    const payment = await prisma.payment.create({
-      data: {
-        orderId,
-        paymentGateway: gateway.toUpperCase(),
-        amount: order.totalAmount,
-        status: 'PENDING',
-      },
-    });
-
-    // 3. Generate a mock redirect URL that allows testing successful/failed webhook notifications
-    const mockRedirectUrl = `http://localhost:3000/api/v1/payments/mock-checkout?paymentId=${payment.id}&gateway=${gateway}&amount=${payment.amount}`;
+    // 2. Generate a mock redirect URL using the orderId directly (since there is no Payment table)
+    const mockRedirectUrl = `http://localhost:3000/api/v1/payments/mock-checkout?paymentId=${orderId}&gateway=${gateway}&amount=${order.totalAmount}`;
 
     return {
-      paymentId: payment.id,
+      paymentId: orderId,
       paymentUrl: mockRedirectUrl,
     };
   }
@@ -123,68 +113,66 @@ export class PaymentService {
     const { paymentId, status, transactionId, responseCode } = params;
 
     return await prisma.$transaction(async (tx) => {
-      // 1. Get payment record
-      const payment = await tx.payment.findUnique({
+      // 1. Get order record (using paymentId as orderId)
+      const order = await tx.order.findUnique({
         where: { id: paymentId },
-        include: { order: { include: { tickets: true } } },
+        include: { orderItems: { include: { tickets: true } } },
       });
 
-      if (!payment) {
-        throw new AppError(404, 'PAYMENT_RECORD_NOT_FOUND', 'Không tìm thấy bản ghi giao dịch thanh toán.');
+      if (!order) {
+        throw new AppError(404, 'ORDER_RECORD_NOT_FOUND', 'Không tìm thấy bản ghi đơn hàng tương ứng.');
       }
 
       // If already processed, return early
-      if (payment.status !== 'PENDING') {
+      if (order.status !== 'PENDING') {
         return {
           processed: false,
-          status: payment.status,
-          orderId: payment.orderId,
+          status: order.status,
+          orderId: order.id,
         };
       }
 
-      // 2. Update payment status
-      const updatedPayment = await tx.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
-          transactionId: transactionId || `TX-${Math.floor(100000 + Math.random() * 900000)}`,
-          responseCode: responseCode || (status === 'SUCCESS' ? '00' : '99'),
-        },
-      });
-
-      // 3. Handle Order & Ticket updates
+      // 2. Handle Order & Ticket updates
       if (status === 'SUCCESS') {
-        // Successful payment: transition order to PAID and tickets to BOOKED
+        // Successful payment: transition order to PAID
         await tx.order.update({
-          where: { id: payment.orderId },
-          data: { status: 'PAID' },
+          where: { id: order.id },
+          data: {
+            status: 'PAID',
+            paidAt: new Date(),
+          },
         });
 
         await tx.ticket.updateMany({
-          where: { orderId: payment.orderId },
-          data: { status: 'BOOKED' },
+          where: {
+            orderItem: {
+              orderId: order.id,
+            },
+          },
+          data: { status: 'valid' },
         });
 
-        console.log(`[Payment Webhook] Order ${payment.orderId} marked as PAID. Tickets created.`);
+        console.log(`[Payment Webhook] Order ${order.id} marked as PAID. Tickets activated.`);
       } else {
-        // Failed payment: transition order to CANCELLED and delete hold tickets to release seats
+        // Failed payment: transition order to CANCELLED and delete tickets to release seats
         await tx.order.update({
-          where: { id: payment.orderId },
+          where: { id: order.id },
           data: { status: 'CANCELLED' },
         });
 
         await tx.ticket.deleteMany({
           where: {
-            orderId: payment.orderId,
-            status: 'RESERVED',
+            orderItem: {
+              orderId: order.id,
+            },
           },
         });
 
-        console.log(`[Payment Webhook] Order ${payment.orderId} marked as CANCELLED. Held seats deleted.`);
+        console.log(`[Payment Webhook] Order ${order.id} marked as CANCELLED. Held seats deleted.`);
       }
 
-      // 4. Invalidate Redis Cache for each affected ticket type
-      const ticketTypeIds = Array.from(new Set(payment.order.tickets.map((t) => t.ticketTypeId)));
+      // 3. Invalidate Redis Cache for each affected ticket type
+      const ticketTypeIds = Array.from(new Set(order.orderItems.map((item) => item.ticketTypeId)));
       for (const ttId of ticketTypeIds) {
         const cacheKey = `ticket_inventory:${ttId}`;
         try {
@@ -198,8 +186,8 @@ export class PaymentService {
 
       return {
         processed: true,
-        status: updatedPayment.status,
-        orderId: payment.orderId,
+        status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+        orderId: order.id,
       };
     });
   }

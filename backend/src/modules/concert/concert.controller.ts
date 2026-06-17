@@ -15,6 +15,9 @@ export class ConcertController {
         location: location ? String(location) : undefined,
       });
 
+      console.log('--- DATABASE_URL in controller:', process.env.DATABASE_URL);
+      console.log('Concerts fetched in controller:', JSON.stringify(concerts, null, 2));
+
       return res.status(200).json({
         success: true,
         data: concerts,

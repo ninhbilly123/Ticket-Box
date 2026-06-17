@@ -39,10 +39,12 @@ export class TicketService {
       // Count tickets already bought successfully (order status = PAID) by this user
       const alreadyBought = await tx.ticket.count({
         where: {
-          ticketTypeId,
-          order: {
-            userId,
-            status: 'PAID',
+          orderItem: {
+            ticketTypeId,
+            order: {
+              userId,
+              status: 'PAID',
+            },
           },
         },
       });
@@ -56,12 +58,16 @@ export class TicketService {
       }
 
       // 3. Check inventory
-      // Count tickets currently locked (RESERVED) or purchased (BOOKED)
+      // Count tickets currently locked (PENDING) or purchased (PAID)
       const soldCount = await tx.ticket.count({
         where: {
-          ticketTypeId,
-          status: {
-            in: ['RESERVED', 'BOOKED'],
+          orderItem: {
+            ticketTypeId,
+            order: {
+              status: {
+                in: ['PENDING', 'PAID'],
+              },
+            },
           },
         },
       });
@@ -84,15 +90,26 @@ export class TicketService {
           concertId,
           totalAmount,
           status: 'PENDING',
+          idempotencyKey: `order-idem-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
         },
       });
 
-      // 5. Create the Ticket records (RESERVED state representing locked seats)
+      // Create the OrderItem
+      const orderItem = await tx.orderItem.create({
+        data: {
+          orderId: order.id,
+          ticketTypeId,
+          quantity,
+          unitPrice: ticketType.price,
+        },
+      });
+
+      // 5. Create the Ticket records
       const ticketData = Array.from({ length: quantity }).map((_, index) => ({
-        orderId: order.id,
-        ticketTypeId,
-        seatNumber: `SEAT-${Math.floor(100 + Math.random() * 900)}`, // Dummy seat number
-        status: 'RESERVED' as const,
+        orderItemId: orderItem.id,
+        userId,
+        qrCode: `QR-${order.id.slice(0, 8)}-${index}-${Math.floor(1000 + Math.random() * 9000)}`,
+        status: 'valid',
       }));
 
       await tx.ticket.createMany({
@@ -100,8 +117,17 @@ export class TicketService {
       });
 
       const tickets = await tx.ticket.findMany({
-        where: { orderId: order.id },
+        where: {
+          orderItem: {
+            orderId: order.id,
+          },
+        },
       });
+
+      const mappedTickets = tickets.map((t) => ({
+        ...t,
+        seatNumber: `GHE-${t.qrCode.slice(-4)}`, // Mock seatNumber for frontend display compatibility
+      }));
 
       // 6. Invalidate Redis Cache (asynchronous/non-blocking delete)
       const cacheKey = `ticket_inventory:${ticketTypeId}`;
@@ -115,7 +141,7 @@ export class TicketService {
 
       return {
         order,
-        tickets,
+        tickets: mappedTickets,
       };
     });
   }
@@ -126,11 +152,29 @@ export class TicketService {
   public async getOrderById(orderId: string) {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { tickets: true },
+      include: {
+        orderItems: {
+          include: {
+            tickets: true,
+          },
+        },
+      },
     });
     if (!order) {
       throw new AppError(404, 'ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng.');
     }
-    return order;
+
+    // Flatten tickets from orderItems for frontend compatibility
+    const flatTickets = order.orderItems.flatMap((item) =>
+      item.tickets.map((t) => ({
+        ...t,
+        seatNumber: `GHE-${t.qrCode.slice(-4)}`,
+      }))
+    );
+
+    return {
+      order,
+      tickets: flatTickets,
+    };
   }
 }
