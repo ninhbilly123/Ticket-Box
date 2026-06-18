@@ -1,4 +1,4 @@
-// File: E:\Desktop\Ticket_Box\Ticket-Box-\frontend\app\(public)\layout.tsx
+// File: C:\Users\Acer\Desktop\Ticket-Box-\frontend\app\(public)\layout.tsx
 import * as entry from '../../../../app/(public)/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

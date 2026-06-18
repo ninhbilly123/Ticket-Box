@@ -58,7 +58,9 @@ export class ConcertService {
     location?: string;
   }) {
     const { search, artist, date, location } = filters;
-    const whereClause: any = {};
+    const whereClause: any = {
+      status: { in: ['PUBLISHED', 'ON_SALE', 'published'] },
+    };
 
     // Filter upcoming concerts (today and future)
     const todayStart = new Date();
@@ -180,6 +182,10 @@ export class ConcertService {
     });
 
     if (!concert) {
+      throw new AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
+    }
+
+    if (!['PUBLISHED', 'ON_SALE', 'published'].includes(concert.status)) {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
     }
 

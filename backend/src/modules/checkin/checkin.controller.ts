@@ -15,7 +15,7 @@ export class CheckinController {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
     if (isUuid) {
       const exists = await prisma.user.findFirst({
-        where: { id: targetId, role: 'gate_staff' },
+        where: { id: targetId, role: { in: ['CHECKIN_STAFF', 'gate_staff'] } },
       });
       if (exists) {
         return targetId;
@@ -23,7 +23,7 @@ export class CheckinController {
     }
     
     const firstStaff = await prisma.user.findFirst({
-      where: { role: 'gate_staff' },
+      where: { role: { in: ['CHECKIN_STAFF', 'gate_staff'] } },
     });
     if (firstStaff) {
       return firstStaff.id;

@@ -77,7 +77,7 @@ export class PaymentService {
       throw new AppError(404, 'ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng yêu cầu.');
     }
 
-    if (order.status !== 'PENDING') {
+    if (!['pending', 'PENDING'].includes(order.status)) {
       throw new AppError(400, 'INVALID_ORDER_STATUS', 'Đơn hàng không ở trạng thái chờ thanh toán.');
     }
 
@@ -124,7 +124,7 @@ export class PaymentService {
       }
 
       // If already processed, return early
-      if (order.status !== 'PENDING') {
+      if (!['pending', 'PENDING'].includes(order.status)) {
         return {
           processed: false,
           status: order.status,
@@ -138,7 +138,7 @@ export class PaymentService {
         await tx.order.update({
           where: { id: order.id },
           data: {
-            status: 'PAID',
+            status: 'paid',
             paidAt: new Date(),
           },
         });
@@ -157,7 +157,7 @@ export class PaymentService {
         // Failed payment: transition order to CANCELLED and delete tickets to release seats
         await tx.order.update({
           where: { id: order.id },
-          data: { status: 'CANCELLED' },
+          data: { status: 'failed' },
         });
 
         await tx.ticket.deleteMany({

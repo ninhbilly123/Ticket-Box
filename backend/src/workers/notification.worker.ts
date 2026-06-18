@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { ConsumeMessage } from 'amqplib';
 import { prisma } from '../shared/lib/prisma';
 import { connectRabbitMQ } from '../shared/lib/rabbitmq';
 
@@ -313,7 +314,7 @@ export async function startNotificationWorker() {
 
     console.log(`[Notification Worker] Worker started, listening to queue [${QUEUE_NAME}]...`);
 
-    channel.consume(QUEUE_NAME, async (msg) => {
+    channel.consume(QUEUE_NAME, async (msg: ConsumeMessage | null) => {
       if (!msg) return;
 
       try {

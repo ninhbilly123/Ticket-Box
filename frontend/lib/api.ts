@@ -21,10 +21,13 @@ export interface TicketType {
 export interface Concert {
   id: string;
   title: string;
+  name?: string;
   description: string | null;
   artist: string;
   dateTime: string;
+  startAt?: string;
   location: string;
+  venue?: string;
   seatMapUrl: string;
   ticketTypes: TicketType[];
 }
@@ -68,15 +71,17 @@ export interface BookTicketsResponse {
     userId: string;
     concertId: string;
     totalAmount: number;
-    status: 'PENDING' | 'PAID' | 'CANCELLED';
+    status: 'pending' | 'paid' | 'failed' | 'refunded' | 'PENDING' | 'PAID' | 'CANCELLED';
     createdAt: string;
   };
   tickets: Array<{
     id: string;
-    orderId: string;
-    ticketTypeId: string;
+    orderId?: string;
+    ticketTypeId?: string;
+    orderItemId?: string;
+    qrCode?: string;
     seatNumber: string | null;
-    status: 'RESERVED' | 'BOOKED' | 'REFUNDED';
+    status: 'valid' | 'used' | 'cancelled' | 'RESERVED' | 'BOOKED' | 'REFUNDED';
     createdAt: string;
   }>;
 }
@@ -109,10 +114,7 @@ export async function fetchOrderById(id: string): Promise<BookTicketsResponse> {
   if (!json.success) {
     throw new Error(json.error?.message || 'Failed to fetch order details');
   }
-  return {
-    order: json.data,
-    tickets: json.data.tickets,
-  };
+  return json.data;
 }
 
 export interface InitiatePaymentResponse {

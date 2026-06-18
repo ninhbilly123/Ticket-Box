@@ -22,7 +22,7 @@ export class TicketService {
     return await prisma.$transaction(async (tx) => {
       // 1. Acquire pessimistic lock on the TicketType record to prevent concurrent updates on the inventory
       const ticketTypes: any[] = await tx.$queryRaw`
-        SELECT id, price, total_quantity as "totalQuantity", max_limit_per_user as "maxLimitPerUser"
+        SELECT id, price, total_quantity as "totalQuantity", max_per_account as "maxLimitPerUser"
         FROM ticket_types 
         WHERE id = ${ticketTypeId} 
         LIMIT 1 
@@ -43,7 +43,7 @@ export class TicketService {
             ticketTypeId,
             order: {
               userId,
-              status: 'PAID',
+              status: { in: ['paid', 'PAID'] },
             },
           },
         },
@@ -65,7 +65,7 @@ export class TicketService {
             ticketTypeId,
             order: {
               status: {
-                in: ['PENDING', 'PAID'],
+                in: ['pending', 'paid', 'PENDING', 'PAID'],
               },
             },
           },
@@ -89,7 +89,7 @@ export class TicketService {
           userId,
           concertId,
           totalAmount,
-          status: 'PENDING',
+          status: 'pending',
           idempotencyKey: `order-idem-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
         },
       });

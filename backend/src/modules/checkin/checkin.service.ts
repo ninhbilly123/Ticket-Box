@@ -334,7 +334,7 @@ export class CheckinService {
           passwordHash: 'AUTO_GENERATED',
           fullName: guest.fullName,
           phone: !guest.identifier.includes('@') ? guest.identifier : null,
-          role: 'audience',
+          role: 'AUDIENCE',
         },
       });
     }

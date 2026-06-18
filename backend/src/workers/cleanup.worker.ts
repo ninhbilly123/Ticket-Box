@@ -2,17 +2,17 @@ import { prisma } from '../shared/lib/prisma';
 import redisClient from '../shared/lib/redis';
 
 /**
- * Cleanup expired PENDING orders (older than 10 minutes)
- * and release their RESERVED ticket holds.
+ * Cleanup expired pending orders (older than 10 minutes)
+ * and release their ticket holds.
  */
 export async function cleanupExpiredOrders() {
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
   try {
-    // 1. Fetch expired PENDING orders
+    // 1. Fetch expired pending orders
     const expiredOrders = await prisma.order.findMany({
       where: {
-        status: 'PENDING',
+        status: { in: ['pending', 'PENDING'] },
         createdAt: {
           lt: tenMinutesAgo,
         },
@@ -37,7 +37,7 @@ export async function cleanupExpiredOrders() {
       await prisma.$transaction(async (tx) => {
         await tx.order.update({
           where: { id: order.id },
-          data: { status: 'CANCELLED' },
+          data: { status: 'failed' },
         });
 
         await tx.ticket.deleteMany({

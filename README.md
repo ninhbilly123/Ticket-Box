@@ -274,3 +274,51 @@ git rebase origin/develop
 
 - [`specs/proposal.md`](./proposal.md) — Mô tả bài toán, phạm vi, mục tiêu
 - [`specs/design.md`](./design.md) — Kiến trúc hệ thống, C4 diagram, DB schema, RBAC, cơ chế kỹ thuật
+---
+
+## Member A: Auth, RBAC, Admin APIs
+
+OpenSpec change:
+
+- `openspec/changes/2026-06-17-auth-rbac-admin/`
+
+Main backend endpoints are mounted under `/api/v1`:
+
+- Auth: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`, `GET /auth/me`
+- Admin concerts: `GET|POST /admin/concerts`, `GET|PATCH /admin/concerts/:id`, `POST /admin/concerts/:id/publish`, `POST /admin/concerts/:id/cancel`
+- Ticket types: `GET|POST /admin/concerts/:concertId/ticket-types`, `PATCH|DELETE /admin/ticket-types/:id`
+- Inventory: `GET|PATCH /admin/ticket-types/:id/inventory`
+- Staff assignments: `GET|POST /admin/concerts/:concertId/staff-assignments`, `DELETE /admin/staff-assignments/:id`
+- Whitelist email configs: `GET|POST /admin/whitelist-email-configs`, `PATCH|DELETE /admin/whitelist-email-configs/:id`
+- Internal CSV worker config: `GET /internal/whitelist-email-configs/active`
+- Revenue: `GET /admin/concerts/:id/revenue-summary`, `GET /admin/concerts/:id/sales-stats`
+- Admin users: `GET /admin/users`, `PATCH /admin/users/:id/role`, `PATCH /admin/users/:id/status`
+- OpenAPI JSON: `GET /openapi/member-a.json`
+
+Seed accounts after `npx prisma db seed`:
+
+| Email | Role | Password |
+|---|---|---|
+| `admin@example.com` | `ADMIN` | `Password123!` |
+| `organizer@example.com` | `ORGANIZER` | `Password123!` |
+| `staff@example.com` | `CHECKIN_STAFF` | `Password123!` |
+| `audience@example.com` | `AUDIENCE` | `Password123!` |
+
+Run locally:
+
+```bash
+docker compose up -d
+cd backend
+npm install
+npx prisma migrate dev
+npx prisma db seed
+npm run dev
+```
+
+Verify Member A flow:
+
+```bash
+cd backend
+npm run build
+npm run test:member-a
+```

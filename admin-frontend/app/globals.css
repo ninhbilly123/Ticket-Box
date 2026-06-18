@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f4f7fb;
+  color: #172033;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@layer components {
+  .input {
+    @apply h-10 w-full rounded border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100;
+  }
+
+  .select {
+    @apply h-10 rounded border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100;
+  }
+
+  .primary-button {
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400;
+  }
+
+  .secondary-button {
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50;
+  }
+
+  .icon-button {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 transition hover:border-slate-400 hover:bg-slate-50;
+  }
+
+  .small-button {
+    @apply inline-flex h-8 items-center justify-center rounded border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-500 hover:text-cyan-700;
+  }
+
+  .danger-small-button {
+    @apply inline-flex h-8 items-center justify-center rounded border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-50;
+  }
+
+  .nav-button {
+    @apply flex h-10 w-full items-center gap-3 rounded px-3 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950;
+  }
+
+  .nav-button-active {
+    @apply bg-slate-950 text-white hover:bg-slate-950 hover:text-white;
+  }
+
+  .admin-table {
+    @apply w-full min-w-[760px] border-collapse text-left text-sm;
+  }
+
+  .admin-table th {
+    @apply border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .admin-table td {
+    @apply border-b border-slate-100 px-3 py-3 align-middle text-slate-700;
+  }
+}

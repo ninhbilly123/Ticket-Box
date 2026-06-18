@@ -392,7 +392,7 @@ export default function ConcertDetailPage() {
               {/* Booking success and payment options box */}
               {bookingSuccess && (
                 <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
-                  {bookingSuccess.order.status === 'PENDING' && (
+                  {['pending', 'PENDING'].includes(bookingSuccess.order.status) && (
                     <div className="space-y-4">
                       <div className="flex items-center gap-2 text-yellow-400 font-bold text-sm">
                         <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
@@ -435,7 +435,7 @@ export default function ConcertDetailPage() {
                     </div>
                   )}
 
-                  {bookingSuccess.order.status === 'PAID' && (
+                  {['paid', 'PAID'].includes(bookingSuccess.order.status) && (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
                         <CheckCircle2 className="w-5 h-5 text-emerald-500" />
@@ -472,7 +472,7 @@ export default function ConcertDetailPage() {
                     </div>
                   )}
 
-                  {bookingSuccess.order.status === 'CANCELLED' && (
+                  {['failed', 'CANCELLED'].includes(bookingSuccess.order.status) && (
                     <div className="space-y-2 text-red-400">
                       <div className="flex items-center gap-2 font-bold text-sm">
                         <AlertTriangle className="w-5 h-5 text-red-500" />
