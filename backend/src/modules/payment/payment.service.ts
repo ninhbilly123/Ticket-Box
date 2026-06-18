@@ -1,6 +1,7 @@
 import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
+import { publishToQueue } from '../../shared/lib/rabbitmq';
 
 export class PaymentService {
   /**
@@ -112,7 +113,7 @@ export class PaymentService {
   }) {
     const { paymentId, status, transactionId, responseCode } = params;
 
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // 1. Get order record (using paymentId as orderId)
       const order = await tx.order.findUnique({
         where: { id: paymentId },
@@ -129,6 +130,9 @@ export class PaymentService {
           processed: false,
           status: order.status,
           orderId: order.id,
+          userId: order.userId,
+          concertId: order.concertId,
+          tickets: [],
         };
       }
 
@@ -188,7 +192,39 @@ export class PaymentService {
         processed: true,
         status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
         orderId: order.id,
+        userId: order.userId,
+        concertId: order.concertId,
+        tickets: status === 'SUCCESS' ? order.orderItems.flatMap((item) => item.tickets) : [],
       };
     });
+
+    // 4. Publish messages to RabbitMQ after transaction successfully commits
+    if (result.processed) {
+      if (result.status === 'SUCCESS') {
+        for (const ticket of result.tickets) {
+          await publishToQueue('ticketbox_notifications', {
+            type: 'purchase_confirm',
+            payload: {
+              userId: result.userId,
+              concertId: result.concertId,
+              ticketId: ticket.id,
+              orderId: result.orderId,
+            },
+          });
+        }
+      } else if (result.status === 'FAILED') {
+        await publishToQueue('ticketbox_notifications', {
+          type: 'purchase_failed',
+          payload: {
+            userId: result.userId,
+            concertId: result.concertId,
+            orderId: result.orderId,
+            reason: 'Giao dịch thanh toán không thành công từ cổng thanh toán.',
+          },
+        });
+      }
+    }
+
+    return result;
   }
 }

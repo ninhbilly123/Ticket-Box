@@ -1,5 +1,6 @@
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
+import { publishToQueue } from '../../shared/lib/rabbitmq';
 
 export class CheckinService {
   /**
@@ -353,15 +354,25 @@ export class CheckinService {
 
     // Nếu khách VIP có trong danh sách nhưng chưa được phát hành vé, tự động phát hành 1 vé VIP
     if (!ticket) {
-      // Tìm ticket type hạng VIP của concert này
+      // Tìm ticket type khớp với hạng ghế (zone) của khách VIP
       let vipType = await prisma.ticketType.findFirst({
         where: {
           concertId: guest.concertId,
-          name: { in: ['VIP', 'SVIP', 'GUEST_LIST'] },
+          name: { equals: guest.zone, mode: 'insensitive' },
         },
       });
 
-      // Nếu không tìm thấy, lấy ticket type đầu tiên
+      // Nếu không tìm thấy hạng vé khớp chính xác với zone, tìm VIP/SVIP/GUEST_LIST làm dự phòng
+      if (!vipType) {
+        vipType = await prisma.ticketType.findFirst({
+          where: {
+            concertId: guest.concertId,
+            name: { in: ['VIP', 'SVIP', 'GUEST_LIST'] },
+          },
+        });
+      }
+
+      // Nếu vẫn không tìm thấy, lấy ticket type đầu tiên có sẵn
       if (!vipType) {
         vipType = await prisma.ticketType.findFirst({
           where: { concertId: guest.concertId },
@@ -400,6 +411,16 @@ export class CheckinService {
             status: 'valid',
           },
         });
+      });
+
+      // Sau khi tạo vé VIP thành công, đẩy tin nhắn xác nhận mua vé (VIP 0đ) vào RabbitMQ
+      await publishToQueue('ticketbox_notifications', {
+        type: 'purchase_confirm',
+        payload: {
+          userId: user.id,
+          concertId: guest.concertId,
+          ticketId: ticket!.id,
+        },
       });
     }
 
