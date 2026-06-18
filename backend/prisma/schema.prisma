@@ -19,6 +19,7 @@ model User {
   
   concerts     Concert[]      // Các concert do organizer tạo
   orders       Order[]        // Các đơn hàng của user
+  tickets      Ticket[]       // Các vé của user
   checkinLogs  CheckinLog[]   // Lịch sử check-in do gate_staff quét
   notifications Notification[]
 
@@ -103,6 +104,7 @@ model Order {
   paidAt         DateTime?   @map("paid_at")
   
   orderItems     OrderItem[]
+  payments       Payment[]
 
   @@map("orders")
 }
@@ -128,6 +130,8 @@ model Ticket {
   orderItemId String       @map("order_item_id") @db.Uuid
   orderItem   OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   userId      String       @map("user_id") @db.Uuid
+  user        User         @relation(fields: [userId], references: [id])
+  seatNumber  String?      @map("seat_number") // Mã ghế cụ thể (nếu có, e.g. A12)
   qrCode      String       @unique @map("qr_code") // Mã QR dùng tại cổng
   status      String       // valid | used | cancelled
   issuedAt    DateTime     @default(now()) @map("issued_at")
@@ -181,4 +185,20 @@ model Notification {
   sentAt      DateTime? @map("sent_at")
 
   @@map("notifications")
+}
+
+// 12. Bảng Lịch sử Thanh toán (Bổ sung từ schema của Lân)
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  orderId        String        @map("order_id") @db.Uuid
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentGateway String        @map("payment_gateway") // VNPAY, MOMO
+  amount         Decimal       @db.Decimal(12, 2)
+  status         String        @default("PENDING") // PENDING, SUCCESS, FAILED
+  transactionId  String?       @map("transaction_id") // Mã giao dịch của cổng thanh toán
+  responseCode   String?       @map("response_code") // Mã phản hồi chi tiết từ đối tác
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  @@map("payments")
 }

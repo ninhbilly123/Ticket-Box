@@ -1,5 +1,4 @@
 {
   "/(public)/page": "app/(public)/page.js",
-  "/(public)/concert/[id]/page": "app/(public)/concert/[id]/page.js",
   "/(public)/checkin/page": "app/(public)/checkin/page.js"
 }
