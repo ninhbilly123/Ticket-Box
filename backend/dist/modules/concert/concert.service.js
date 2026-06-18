@@ -12,40 +12,36 @@ class ConcertService {
      * Helper to retrieve remaining tickets for a ticket type with Redis Cache-aside (TTL 30s)
      */
     async getRemainingTickets(ticketTypeId, totalQuantity) {
-        const cacheKey = `ticket_inventory:${ticketTypeId}`;
+        const cacheKey = `ticket_inventory_detailed:${ticketTypeId}`;
         try {
-            // 1. Check Redis Cache
             if (redis_1.default.isOpen) {
                 const cached = await redis_1.default.get(cacheKey);
                 if (cached !== null) {
-                    return parseInt(cached, 10);
+                    return JSON.parse(cached);
                 }
             }
         }
         catch (err) {
             console.error(`[Redis Error] Failed to read cache for ${ticketTypeId}:`, err);
         }
-        // 2. Cache Miss: Query PostgreSQL
-        // Tickets with status RESERVED (temporary hold) or BOOKED (paid) are considered sold/unavailable.
-        const soldCount = await prisma_1.prisma.ticket.count({
-            where: {
-                ticketTypeId,
-                status: {
-                    in: ['RESERVED', 'BOOKED'],
-                },
-            },
+        const reservedCount = await prisma_1.prisma.ticket.count({
+            where: { ticketTypeId, status: 'RESERVED' },
         });
+        const bookedCount = await prisma_1.prisma.ticket.count({
+            where: { ticketTypeId, status: 'BOOKED' },
+        });
+        const soldCount = reservedCount + bookedCount;
         const remaining = Math.max(0, totalQuantity - soldCount);
+        const result = { remaining, reserved: reservedCount, booked: bookedCount };
         try {
-            // 3. Write back to Redis cache with 30 seconds TTL
             if (redis_1.default.isOpen) {
-                await redis_1.default.setEx(cacheKey, 30, remaining.toString());
+                await redis_1.default.setEx(cacheKey, 30, JSON.stringify(result));
             }
         }
         catch (err) {
             console.error(`[Redis Error] Failed to set cache for ${ticketTypeId}:`, err);
         }
-        return remaining;
+        return result;
     }
     /**
      * Fetch all upcoming concerts with optional search & filters
@@ -96,14 +92,16 @@ class ConcertService {
         // Populate remaining tickets for each ticket type in each concert
         const populatedConcerts = await Promise.all(concerts.map(async (concert) => {
             const ticketTypesWithRemaining = await Promise.all(concert.ticketTypes.map(async (tt) => {
-                const remaining = await this.getRemainingTickets(tt.id, tt.totalQuantity);
+                const counts = await this.getRemainingTickets(tt.id, tt.totalQuantity);
                 return {
                     id: tt.id,
                     name: tt.name,
                     price: tt.price,
                     totalQuantity: tt.totalQuantity,
                     maxLimitPerUser: tt.maxLimitPerUser,
-                    remaining,
+                    remaining: counts.remaining,
+                    reserved: counts.reserved,
+                    booked: counts.booked,
                 };
             }));
             return {
@@ -127,20 +125,27 @@ class ConcertService {
             where: { id },
             include: {
                 ticketTypes: true,
+                artistBios: {
+                    where: { status: 'PUBLISHED' },
+                    orderBy: { publishedAt: 'desc' },
+                    take: 1,
+                },
             },
         });
         if (!concert) {
             throw new errors_1.AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
         }
         const ticketTypesWithRemaining = await Promise.all(concert.ticketTypes.map(async (tt) => {
-            const remaining = await this.getRemainingTickets(tt.id, tt.totalQuantity);
+            const counts = await this.getRemainingTickets(tt.id, tt.totalQuantity);
             return {
                 id: tt.id,
                 name: tt.name,
                 price: tt.price,
                 totalQuantity: tt.totalQuantity,
                 maxLimitPerUser: tt.maxLimitPerUser,
-                remaining,
+                remaining: counts.remaining,
+                reserved: counts.reserved,
+                booked: counts.booked,
             };
         }));
         return {
@@ -152,6 +157,7 @@ class ConcertService {
             location: concert.location,
             seatMapUrl: concert.seatMapUrl,
             ticketTypes: ticketTypesWithRemaining,
+            artistBio: concert.artistBios[0]?.publishedBio || null,
         };
     }
 }

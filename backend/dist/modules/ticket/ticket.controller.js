@@ -31,5 +31,31 @@ class TicketController {
             next(err);
         }
     }
+    async getOrder(req, res, next) {
+        try {
+            const { id } = req.params;
+            const order = await ticketService.getOrderById(id);
+            return res.status(200).json({
+                success: true,
+                data: order,
+            });
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    async scanTicket(req, res, next) {
+        try {
+            const { qrToken } = req.body;
+            const result = await ticketService.scanTicket(qrToken);
+            return res.status(200).json({
+                success: true,
+                data: result,
+            });
+        }
+        catch (err) {
+            next(err);
+        }
+    }
 }
 exports.TicketController = TicketController;

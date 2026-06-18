@@ -1,11 +1,15 @@
 import nodemailer from 'nodemailer';
 
+function normalizeEnvSecret(value: string | undefined, fallback: string): string {
+  return (value || fallback).replace(/\s+/g, '');
+}
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.ethereal.email',
   port: parseInt(process.env.SMTP_PORT || '587', 10),
   auth: {
     user: process.env.SMTP_USER || 'test',
-    pass: process.env.SMTP_PASS || 'test',
+    pass: normalizeEnvSecret(process.env.SMTP_PASS, 'test'),
   },
 });
 

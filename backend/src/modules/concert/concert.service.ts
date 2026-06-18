@@ -145,6 +145,11 @@ export class ConcertService {
       where: { id },
       include: {
         ticketTypes: true,
+        artistBios: {
+          where: { status: 'PUBLISHED' },
+          orderBy: { publishedAt: 'desc' },
+          take: 1,
+        },
       },
     });
 
@@ -177,6 +182,7 @@ export class ConcertService {
       location: concert.location,
       seatMapUrl: concert.seatMapUrl,
       ticketTypes: ticketTypesWithRemaining,
+      artistBio: concert.artistBios[0]?.publishedBio || null,
     };
   }
 }

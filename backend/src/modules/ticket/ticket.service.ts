@@ -1,7 +1,7 @@
 import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
-import { verifyQrToken } from '../../shared/lib/crypto';
+import { verifyQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 export class TicketService {
   /**
@@ -162,7 +162,7 @@ export class TicketService {
     });
 
     if (!ticket) {
-      throw new AppError(404, 'INVALID_TICKET', 'Vé không hợp lệ hoặc không tồn tại trong hệ thống.');
+      return this.scanVipGuestTicket(qrToken);
     }
 
     if (!verifyQrToken(ticket.id, qrToken)) {
@@ -188,6 +188,42 @@ export class TicketService {
       seatNumber: updatedTicket.seatNumber,
       ticketType: ticket.ticketType.name,
       checkedInAt: new Date(),
+    };
+  }
+
+  private async scanVipGuestTicket(qrToken: string) {
+    const vipGuest = await prisma.vipGuest.findUnique({
+      where: { qrToken },
+      include: { concert: true },
+    });
+
+    if (!vipGuest) {
+      throw new AppError(404, 'INVALID_TICKET', 'Vé không hợp lệ hoặc không tồn tại trong hệ thống.');
+    }
+
+    if (!verifyVipGuestQrToken(vipGuest.id, qrToken)) {
+      throw new AppError(400, 'INVALID_VIP_TICKET', 'Mã QR khách mời VIP không hợp lệ.');
+    }
+
+    if (vipGuest.ticketStatus !== 'VALID') {
+      throw new AppError(400, 'VIP_TICKET_ALREADY_USED', 'E-ticket VIP đã được sử dụng hoặc không còn hợp lệ.');
+    }
+
+    const updatedGuest = await prisma.vipGuest.update({
+      where: { id: vipGuest.id },
+      data: {
+        ticketStatus: 'USED',
+        checkedInAt: new Date(),
+      },
+    });
+
+    return {
+      id: updatedGuest.id,
+      ticketType: 'VIP_GUEST',
+      fullName: updatedGuest.fullName,
+      company: updatedGuest.company,
+      concert: vipGuest.concert.title,
+      checkedInAt: updatedGuest.checkedInAt,
     };
   }
 }

@@ -274,3 +274,68 @@ git rebase origin/develop
 
 - [`specs/proposal.md`](./proposal.md) — Mô tả bài toán, phạm vi, mục tiêu
 - [`specs/design.md`](./design.md) — Kiến trúc hệ thống, C4 diagram, DB schema, RBAC, cơ chế kỹ thuật
+
+---
+
+## AI Artist Bio va VIP Guest Sync
+
+### Cau hinh moi
+
+Backend can cac bien moi trong `backend/.env.example`:
+
+- `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`: ket noi MinIO/S3-compatible storage.
+- `ARTIST_BIO_BUCKET`, `VIP_GUEST_IMPORT_BUCKET`, `TICKET_ASSET_BUCKET`: bucket luu PDF, CSV va asset e-ticket.
+- `GEMINI_API_KEY`, `GEMINI_MODEL`: goi Google Gemini API that de sinh artist bio tieng Viet.
+- `IMAP_HOST`, `IMAP_PORT`, `IMAP_USER`, `IMAP_PASSWORD`, `IMAP_MAILBOX`: mailbox demo doc CSV khach moi VIP.
+- `VIP_GUEST_IMPORT_CRON`: lich cron doc mailbox, mac dinh `0 1 * * *`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`: gui e-ticket VIP qua email.
+
+Docker Compose da co them MinIO:
+
+```bash
+docker compose up -d postgres redis rabbitmq minio
+```
+
+MinIO console mac dinh: `http://localhost:9001`
+
+```text
+user: minioadmin
+password: minioadmin123
+```
+
+### CSV khach moi VIP
+
+Header bat buoc:
+
+```csv
+fullName,email,phone,company,eventCode,note
+Nguyen Van A,a@example.com,0900000001,Sponsor A,ATSH-2026-HCM,Khach moi hang VIP
+Tran Thi B,b@example.com,0900000002,Sponsor A,ATVNCG-2026-HN,
+```
+
+Quy tac import:
+
+- `eventCode` map den `Concert.eventCode`.
+- `fullName` bat buoc.
+- Can co it nhat mot trong `email` hoac `phone`.
+- Chong trung theo `concertId + email`, fallback `concertId + phone`.
+- Dong loi/trung bi bo qua, dong hop le van duoc import.
+- Moi khach moi co email hop le se duoc tao QR e-ticket va gui mail.
+
+### Demo luong AI Artist Bio
+
+1. Cau hinh `GEMINI_API_KEY` va MinIO.
+2. Upload PDF qua API `POST /api/v1/ai/artist-bio/concerts/:concertId/upload` voi field file la `file`.
+3. Worker xu ly PDF, goi Gemini va chuyen trang thai sang `AI_GENERATED`.
+4. Ban to chuc goi `PATCH /api/v1/ai/artist-bio/:id/review` de duyet/chinh sua bio.
+5. Ban to chuc goi `POST /api/v1/ai/artist-bio/:id/publish`.
+6. API chi tiet concert chi tra `artistBio` khi bio da `PUBLISHED`.
+
+### Demo luong VIP Guest Sync
+
+1. Cau hinh sponsor email qua `POST /api/v1/vip-guest-sync/sponsors`.
+2. Sponsor gui CSV vao mailbox IMAP demo.
+3. Cron worker doc mailbox, luu CSV goc vao MinIO va tao import job.
+4. Import worker validate CSV, tao `VipGuest`, sinh QR va enqueue email e-ticket.
+5. Ban to chuc xem report qua `GET /api/v1/vip-guest-sync/import-reports`.
+6. Nhan su soat ve quet QR VIP bang endpoint `POST /api/v1/tickets/scan`.

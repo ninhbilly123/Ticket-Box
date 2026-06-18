@@ -44,14 +44,10 @@ export const reservationWorker = new Worker(
             data: { status: 'CANCELLED' },
           });
 
-          await tx.ticket.updateMany({
+          await tx.ticket.deleteMany({
             where: {
               orderId: order.id,
               status: 'RESERVED',
-            },
-            data: {
-              status: 'AVAILABLE',
-              orderId: null
             }
           });
         });
