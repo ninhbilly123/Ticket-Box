@@ -13,15 +13,13 @@ import {
   RefreshCw,
   Shield,
   Ticket,
-  UserCog,
   Users,
 } from 'lucide-react';
 import {
-  AdminUser,
   AuthSession,
   Concert,
   RevenueSummary,
-  Role,
+  StaffUser,
   StaffAssignment,
   TicketType,
   WhitelistConfig,
@@ -29,18 +27,17 @@ import {
   formatMoney,
 } from '../lib/api';
 
-type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'revenue' | 'users';
+type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'revenue';
 
 const SESSION_KEY = 'ticketbox_admin_session';
 
-const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3; adminOnly?: boolean }> = [
+const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
   { key: 'concerts', label: 'Concerts', icon: CalendarClock },
   { key: 'tickets', label: 'Ticket Types', icon: Ticket },
   { key: 'staff', label: 'Staff', icon: Users },
   { key: 'whitelist', label: 'Whitelist', icon: MailCheck },
   { key: 'revenue', label: 'Revenue', icon: ClipboardList },
-  { key: 'users', label: 'Users', icon: UserCog, adminOnly: true },
 ];
 
 const emptyConcertForm = {
@@ -70,6 +67,13 @@ const emptyWhitelistForm = {
   organizationId: '',
 };
 
+const emptyStaffUserForm = {
+  email: '',
+  fullName: '',
+  phone: '',
+  password: 'Password123!',
+};
+
 export default function AdminHomePage() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
@@ -84,12 +88,13 @@ export default function AdminHomePage() {
   const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
   const [whitelistConfigs, setWhitelistConfigs] = useState<WhitelistConfig[]>([]);
   const [revenue, setRevenue] = useState<RevenueSummary | null>(null);
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
 
   const [loginForm, setLoginForm] = useState({ email: 'organizer@example.com', password: 'Password123!' });
   const [concertForm, setConcertForm] = useState(emptyConcertForm);
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);
   const [staffForm, setStaffForm] = useState({ staffId: '', gateId: 'GATE-A' });
+  const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
   const [whitelistForm, setWhitelistForm] = useState(emptyWhitelistForm);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Cancelled by organizer');
@@ -99,10 +104,7 @@ export default function AdminHomePage() {
     () => concerts.find((concert) => concert.id === selectedConcertId) || concerts[0] || null,
     [concerts, selectedConcertId]
   );
-  const staffUsers = useMemo(() => users.filter((user) => user.role === 'CHECKIN_STAFF'), [users]);
-  const isAdmin = session?.user.role === 'ADMIN';
   const isOrganizer = session?.user.role === 'ORGANIZER';
-  const canUseAdmin = isAdmin || isOrganizer;
 
   useEffect(() => {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -121,7 +123,7 @@ export default function AdminHomePage() {
   }, []);
 
   useEffect(() => {
-    if (session && canUseAdmin) {
+    if (session && isOrganizer) {
       void loadAll();
     }
   }, [session?.accessToken]);
@@ -137,17 +139,16 @@ export default function AdminHomePage() {
     setLoading(true);
     setError(null);
     try {
-      const [concertList, whitelistList] = await Promise.all([
+      const [concertList, whitelistList, staffList] = await Promise.all([
         adminApi.listConcerts(token),
         adminApi.listWhitelistConfigs(token),
+        adminApi.listStaff(token),
       ]);
       setConcerts(concertList);
       setWhitelistConfigs(whitelistList);
+      setStaffUsers(staffList);
       if (!selectedConcertId && concertList[0]) {
         setSelectedConcertId(concertList[0].id);
-      }
-      if (isAdmin) {
-        setUsers(await adminApi.listUsers(token));
       }
     } catch (err) {
       setError(getErrorMessage(err));
@@ -244,7 +245,7 @@ export default function AdminHomePage() {
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3 text-xs text-slate-300">
-              <Metric label="Roles" value="4" />
+              <Metric label="Roles" value="3" />
               <Metric label="Port" value="3002" />
               <Metric label="API" value="3000" />
             </div>
@@ -254,7 +255,7 @@ export default function AdminHomePage() {
             <form onSubmit={handleLogin} className="w-full max-w-sm space-y-5">
               <div>
                 <h2 className="text-xl font-semibold">Sign in</h2>
-                <p className="mt-1 text-sm text-slate-500">Use organizer or admin seed account.</p>
+                <p className="mt-1 text-sm text-slate-500">Use the organizer seed account.</p>
               </div>
               <Field label="Email">
                 <input
@@ -284,13 +285,13 @@ export default function AdminHomePage() {
     );
   }
 
-  if (!canUseAdmin) {
+  if (!isOrganizer) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#eef3f8] p-6">
         <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
           <AlertTriangle className="mx-auto h-10 w-10 text-rose-600" />
           <h1 className="mt-4 text-xl font-semibold">Access denied</h1>
-          <p className="mt-2 text-sm text-slate-500">Only ADMIN and ORGANIZER accounts can use this console.</p>
+          <p className="mt-2 text-sm text-slate-500">Only ORGANIZER accounts can use this console.</p>
           <button onClick={handleLogout} className="secondary-button mt-6 w-full" type="button">
             <LogOut className="h-4 w-4" />
             Sign out
@@ -317,7 +318,6 @@ export default function AdminHomePage() {
           </div>
           <nav className="space-y-1 p-3">
             {tabs
-              .filter((tab) => !tab.adminOnly || isAdmin)
               .map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -490,13 +490,6 @@ export default function AdminHomePage() {
               <TextInput label="Venue" value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
               <TextInput label="Start at" type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
               <TextInput label="Sale open" type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
-              {isAdmin && (
-                <TextInput
-                  label="Organization ID"
-                  value={concertForm.organizationId}
-                  onChange={(value) => setConcertForm({ ...concertForm, organizationId: value })}
-                />
-              )}
               <TextInput label="Description" value={concertForm.description} onChange={(value) => setConcertForm({ ...concertForm, description: value })} />
               <button disabled={saving} className="primary-button w-full" type="submit">
                 <Check className="h-4 w-4" />
@@ -620,39 +613,72 @@ export default function AdminHomePage() {
               ))}
             />
           </Panel>
-          <Panel title="Assign staff">
-            <form
-              className="space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!selectedConcert) return;
-                void runMutation(
-                  () => adminApi.createStaffAssignment(token, selectedConcert.id, staffForm.staffId, staffForm.gateId),
-                  'Staff assigned.'
-                );
-              }}
-            >
-              {isAdmin && staffUsers.length > 0 ? (
-                <Field label="Staff">
-                  <select value={staffForm.staffId} onChange={(event) => setStaffForm({ ...staffForm, staffId: event.target.value })} className="select w-full">
-                    <option value="">Select staff</option>
-                    {staffUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.fullName} - {user.email}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              ) : (
-                <TextInput label="Staff ID" value={staffForm.staffId} onChange={(value) => setStaffForm({ ...staffForm, staffId: value })} />
-              )}
-              <TextInput label="Gate ID" value={staffForm.gateId} onChange={(value) => setStaffForm({ ...staffForm, gateId: value })} />
-              <button disabled={saving || !selectedConcert} className="primary-button w-full" type="submit">
-                <Users className="h-4 w-4" />
-                Assign
-              </button>
-            </form>
-          </Panel>
+          <div className="space-y-5">
+            <Panel title="Create staff">
+              <form
+                className="space-y-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void runMutation(
+                    async () => {
+                      const created = await adminApi.createStaff(token, {
+                        email: staffUserForm.email,
+                        fullName: staffUserForm.fullName,
+                        phone: staffUserForm.phone || undefined,
+                        password: staffUserForm.password,
+                      });
+                      setStaffForm((current) => ({ ...current, staffId: created.id }));
+                      setStaffUserForm(emptyStaffUserForm);
+                    },
+                    'Staff account created.'
+                  );
+                }}
+              >
+                <TextInput label="Email" type="email" value={staffUserForm.email} onChange={(value) => setStaffUserForm({ ...staffUserForm, email: value })} />
+                <TextInput label="Full name" value={staffUserForm.fullName} onChange={(value) => setStaffUserForm({ ...staffUserForm, fullName: value })} />
+                <TextInput label="Phone" value={staffUserForm.phone} onChange={(value) => setStaffUserForm({ ...staffUserForm, phone: value })} />
+                <TextInput label="Password" type="password" value={staffUserForm.password} onChange={(value) => setStaffUserForm({ ...staffUserForm, password: value })} />
+                <button disabled={saving} className="primary-button w-full" type="submit">
+                  <Users className="h-4 w-4" />
+                  Create staff
+                </button>
+              </form>
+            </Panel>
+
+            <Panel title="Assign staff">
+              <form
+                className="space-y-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!selectedConcert) return;
+                  void runMutation(
+                    () => adminApi.createStaffAssignment(token, selectedConcert.id, staffForm.staffId, staffForm.gateId),
+                    'Staff assigned.'
+                  );
+                }}
+              >
+                {staffUsers.length > 0 ? (
+                  <Field label="Staff">
+                    <select value={staffForm.staffId} onChange={(event) => setStaffForm({ ...staffForm, staffId: event.target.value })} className="select w-full">
+                      <option value="">Select staff</option>
+                      {staffUsers.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.fullName} - {user.email}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : (
+                  <TextInput label="Staff ID" value={staffForm.staffId} onChange={(value) => setStaffForm({ ...staffForm, staffId: value })} />
+                )}
+                <TextInput label="Gate ID" value={staffForm.gateId} onChange={(value) => setStaffForm({ ...staffForm, gateId: value })} />
+                <button disabled={saving || !selectedConcert} className="primary-button w-full" type="submit">
+                  <Users className="h-4 w-4" />
+                  Assign
+                </button>
+              </form>
+            </Panel>
+          </div>
         </div>
       );
     }
@@ -703,9 +729,6 @@ export default function AdminHomePage() {
               <TextInput label="Mailbox" value={whitelistForm.mailboxAddress} onChange={(value) => setWhitelistForm({ ...whitelistForm, mailboxAddress: value })} />
               <TextInput label="Allowed sender" value={whitelistForm.allowedSenderEmail} onChange={(value) => setWhitelistForm({ ...whitelistForm, allowedSenderEmail: value })} />
               <TextInput label="Subject keyword" value={whitelistForm.subjectKeyword} onChange={(value) => setWhitelistForm({ ...whitelistForm, subjectKeyword: value })} />
-              {isAdmin && (
-                <TextInput label="Organization ID" value={whitelistForm.organizationId} onChange={(value) => setWhitelistForm({ ...whitelistForm, organizationId: value })} />
-              )}
               <button disabled={saving} className="primary-button w-full" type="submit">
                 <MailCheck className="h-4 w-4" />
                 Create config
@@ -735,66 +758,6 @@ export default function AdminHomePage() {
             />
           </Panel>
         </div>
-      );
-    }
-
-    if (activeTab === 'users') {
-      return (
-        <Panel title="Users">
-          <div className="overflow-x-auto">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td className="font-medium">{user.fullName}</td>
-                    <td>{user.email}</td>
-                    <td>
-                      <select
-                        value={user.role}
-                        onChange={(event) =>
-                          runMutation(() => adminApi.updateUserRole(token, user.id, event.target.value as Role), 'User role updated.')
-                        }
-                        className="select h-9"
-                      >
-                        {(['ADMIN', 'ORGANIZER', 'CHECKIN_STAFF', 'AUDIENCE'] as Role[]).map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <StatusBadge status={user.status} />
-                    </td>
-                    <td>
-                      <button
-                        onClick={() =>
-                          runMutation(
-                            () => adminApi.updateUserStatus(token, user.id, user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'),
-                            'User status updated.'
-                          )
-                        }
-                        className="small-button"
-                        type="button"
-                      >
-                        Toggle status
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
       );
     }
 

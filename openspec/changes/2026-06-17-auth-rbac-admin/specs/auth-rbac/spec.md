@@ -36,12 +36,6 @@ The system SHALL restrict protected APIs based on the authenticated user's role.
 - **WHEN** a user with role `CHECKIN_STAFF` calls an organizer admin API
 - **THEN** the system SHALL reject the request with `FORBIDDEN_ROLE`.
 
-#### Scenario: Admin can access all admin APIs
-- **WHEN** a user with role `ADMIN` calls an admin API
-- **THEN** the system SHALL allow the request.
-
----
-
 ### Requirement: Object-Level Authorization
 The system SHALL prevent users from accessing resources they do not own or are not assigned to.
 
@@ -56,4 +50,3 @@ The system SHALL prevent users from accessing resources they do not own or are n
 #### Scenario: Staff cannot scan unassigned concert or gate
 - **WHEN** check-in staff attempts to scan a concert/gate without assignment
 - **THEN** the system SHALL reject the request with `STAFF_NOT_ASSIGNED`.
-

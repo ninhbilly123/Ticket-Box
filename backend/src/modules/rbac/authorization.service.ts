@@ -2,17 +2,11 @@ import { prisma } from '../../shared/lib/prisma';
 import { AuthUser } from '../../shared/types/auth';
 
 export class AuthorizationService {
-  public isAdmin(user: AuthUser): boolean {
-    return user.role === 'ADMIN';
-  }
-
   public async canManageOrganization(user: AuthUser, organizationId: string): Promise<boolean> {
-    if (this.isAdmin(user)) return true;
     return user.role === 'ORGANIZER' && user.organizationId === organizationId;
   }
 
   public async canManageConcert(user: AuthUser, concertId: string): Promise<boolean> {
-    if (this.isAdmin(user)) return true;
     if (user.role !== 'ORGANIZER' || !user.organizationId) return false;
 
     const concert = await prisma.concert.findUnique({
@@ -25,8 +19,6 @@ export class AuthorizationService {
   }
 
   public async canViewOrder(user: AuthUser, orderId: string): Promise<boolean> {
-    if (this.isAdmin(user)) return true;
-
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       select: {
@@ -47,8 +39,6 @@ export class AuthorizationService {
   }
 
   public async canViewTicket(user: AuthUser, ticketId: string): Promise<boolean> {
-    if (this.isAdmin(user)) return true;
-
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
@@ -75,7 +65,6 @@ export class AuthorizationService {
   }
 
   public async canScanConcert(user: AuthUser, concertId: string, gateId?: string): Promise<boolean> {
-    if (this.isAdmin(user)) return true;
     if (user.role !== 'CHECKIN_STAFF') return false;
 
     const assignment = await prisma.staffAssignment.findFirst({
@@ -91,4 +80,3 @@ export class AuthorizationService {
 }
 
 export const authorizationService = new AuthorizationService();
-

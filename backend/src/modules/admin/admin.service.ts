@@ -1,8 +1,10 @@
+import bcrypt from 'bcryptjs';
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
-import { AuthUser, Role } from '../../shared/types/auth';
+import { AuthUser } from '../../shared/types/auth';
 import { authorizationService } from '../rbac/authorization.service';
 import { normalizeRole } from '../rbac/roles';
+import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
 
 const PAID_STATUSES = ['paid', 'PAID'];
 const ACTIVE_CONCERT_STATUSES = ['DRAFT', 'PUBLISHED', 'ON_SALE', 'SALE_CLOSED', 'COMPLETED', 'CANCELLED'];
@@ -40,21 +42,12 @@ export class AdminService {
     description?: string;
     svgSeatingMap?: string;
     organizationId?: string;
-    organizerId?: string;
   }) {
     const organizationId = this.resolveWritableOrganization(user, input.organizationId);
-    const organizerId = user.role === 'ADMIN' && input.organizerId ? input.organizerId : user.id;
 
-    if (input.organizerId) {
-      const organizer = await prisma.user.findUnique({ where: { id: organizerId } });
-      if (!organizer || !['ORGANIZER', 'organizer'].includes(organizer.role)) {
-        throw new AppError(400, 'FORBIDDEN_RESOURCE', 'Organizer user is invalid.');
-      }
-    }
-
-    return prisma.concert.create({
+    const concert = await prisma.concert.create({
       data: {
-        organizerId,
+        organizerId: user.id,
         organizationId,
         name: input.name,
         venue: input.venue,
@@ -65,6 +58,9 @@ export class AdminService {
         svgSeatingMap: input.svgSeatingMap,
       },
     });
+
+    await publishConcertListingInvalidation('concert.created', { concertId: concert.id });
+    return concert;
   }
 
   public async updateConcert(user: AuthUser, concertId: string, input: Record<string, unknown>) {
@@ -79,7 +75,9 @@ export class AdminService {
     if (typeof input.startAt === 'string') data.startAt = new Date(input.startAt);
     if (typeof input.saleOpenAt === 'string') data.saleOpenAt = new Date(input.saleOpenAt);
 
-    return prisma.concert.update({ where: { id: concertId }, data });
+    const concert = await prisma.concert.update({ where: { id: concertId }, data });
+    await publishConcertListingInvalidation('concert.updated', { concertId });
+    return concert;
   }
 
   public async publishConcert(user: AuthUser, concertId: string) {
@@ -87,12 +85,14 @@ export class AdminService {
     if (!['DRAFT', 'draft', 'PUBLISHED', 'published'].includes(concert.status)) {
       throw new AppError(400, 'CONCERT_INVALID_STATUS_TRANSITION', 'Concert cannot be published from current status.');
     }
-    return prisma.concert.update({ where: { id: concertId }, data: { status: 'PUBLISHED' } });
+    const updated = await prisma.concert.update({ where: { id: concertId }, data: { status: 'PUBLISHED' } });
+    await publishConcertListingInvalidation('concert.published', { concertId });
+    return updated;
   }
 
   public async cancelConcert(user: AuthUser, concertId: string, reason?: string) {
     await this.assertCanManageConcert(user, concertId);
-    return prisma.concert.update({
+    const updated = await prisma.concert.update({
       where: { id: concertId },
       data: {
         status: 'CANCELLED',
@@ -100,6 +100,8 @@ export class AdminService {
         cancelledAt: new Date(),
       },
     });
+    await publishConcertListingInvalidation('concert.cancelled', { concertId });
+    return updated;
   }
 
   public async listTicketTypes(user: AuthUser, concertId: string) {
@@ -122,7 +124,7 @@ export class AdminService {
     await this.assertCanManageConcert(user, concertId);
     this.validateTicketTypeInput(input);
 
-    return prisma.$transaction(async (tx) => {
+    const ticketType = await prisma.$transaction(async (tx) => {
       const ticketType = await tx.ticketType.create({
         data: {
           concertId,
@@ -148,6 +150,9 @@ export class AdminService {
 
       return ticketType;
     });
+
+    await publishConcertListingInvalidation('ticket-type.updated', { concertId, ticketTypeId: ticketType.id });
+    return ticketType;
   }
 
   public async updateTicketType(user: AuthUser, ticketTypeId: string, input: Record<string, unknown>) {
@@ -175,7 +180,12 @@ export class AdminService {
       throw new AppError(400, 'SALE_TIME_INVALID', 'saleOpenAt must be before saleCloseAt.');
     }
 
-    return prisma.ticketType.update({ where: { id: ticketTypeId }, data });
+    const updated = await prisma.ticketType.update({ where: { id: ticketTypeId }, data });
+    await publishConcertListingInvalidation('ticket-type.updated', {
+      concertId: ticketType.concertId,
+      ticketTypeId,
+    });
+    return updated;
   }
 
   public async deleteTicketType(user: AuthUser, ticketTypeId: string) {
@@ -191,6 +201,10 @@ export class AdminService {
     }
 
     await prisma.ticketType.delete({ where: { id: ticketTypeId } });
+    await publishConcertListingInvalidation('ticket-type.updated', {
+      concertId: ticketType.concertId,
+      ticketTypeId,
+    });
     return { deleted: true };
   }
 
@@ -218,7 +232,7 @@ export class AdminService {
       throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'New total quantity cannot be less than sold plus reserved quantity.');
     }
 
-    return prisma.$transaction(async (tx) => {
+    const inventory = await prisma.$transaction(async (tx) => {
       await tx.ticketType.update({
         where: { id: ticketTypeId },
         data: {
@@ -245,6 +259,11 @@ export class AdminService {
         },
       });
     });
+    await publishConcertListingInvalidation('ticket-type.updated', {
+      concertId: ticketType.concertId,
+      ticketTypeId,
+    });
+    return inventory;
   }
 
   public async listStaffAssignments(user: AuthUser, concertId: string) {
@@ -261,6 +280,9 @@ export class AdminService {
     const staff = await prisma.user.findUnique({ where: { id: staffId } });
     if (!staff || normalizeRole(staff.role) !== 'CHECKIN_STAFF') {
       throw new AppError(403, 'FORBIDDEN_ROLE', 'Assigned user must have CHECKIN_STAFF role.');
+    }
+    if (!user.organizationId || staff.organizationId !== user.organizationId) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot assign staff outside your organization.');
     }
 
     return prisma.staffAssignment.upsert({
@@ -279,8 +301,10 @@ export class AdminService {
   }
 
   public async listWhitelistConfigs(user: AuthUser) {
+    const organizationId = this.resolveWritableOrganization(user);
+
     return prisma.whitelistEmailConfig.findMany({
-      where: user.role === 'ADMIN' ? {} : { organizationId: user.organizationId || undefined },
+      where: { organizationId },
       include: { concert: { select: { id: true, name: true } }, organization: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -378,9 +402,17 @@ export class AdminService {
     };
   }
 
-  public async listUsers(user: AuthUser) {
-    if (user.role !== 'ADMIN') throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ADMIN can manage users.');
+  public async listStaffUsers(user: AuthUser) {
+    if (user.role !== 'ORGANIZER' || !user.organizationId) {
+      throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ORGANIZER can list check-in staff.');
+    }
+
     return prisma.user.findMany({
+      where: {
+        organizationId: user.organizationId,
+        role: 'CHECKIN_STAFF',
+        status: 'ACTIVE',
+      },
       select: {
         id: true,
         email: true,
@@ -391,33 +423,57 @@ export class AdminService {
         organizationId: true,
         createdAt: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { fullName: 'asc' },
     });
   }
 
-  public async updateUserRole(user: AuthUser, targetUserId: string, role: Role) {
-    if (user.role !== 'ADMIN') throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ADMIN can update roles.');
-    return prisma.user.update({
-      where: { id: targetUserId },
-      data: { role },
-      select: { id: true, email: true, fullName: true, role: true, status: true, organizationId: true },
-    });
-  }
+  public async createStaffUser(user: AuthUser, input: {
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+  }) {
+    const organizationId = this.resolveWritableOrganization(user);
+    const email = input.email.toLowerCase();
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new AppError(400, 'AUTH_EMAIL_EXISTS', 'Email is already registered.');
+    }
 
-  public async updateUserStatus(user: AuthUser, targetUserId: string, status: 'ACTIVE' | 'DISABLED') {
-    if (user.role !== 'ADMIN') throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ADMIN can update user status.');
-    return prisma.user.update({
-      where: { id: targetUserId },
-      data: { status },
-      select: { id: true, email: true, fullName: true, role: true, status: true, organizationId: true },
+    const passwordHash = await bcrypt.hash(input.password, 10);
+    return prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName: input.fullName,
+        phone: input.phone,
+        role: 'CHECKIN_STAFF',
+        organizationId,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        role: true,
+        status: true,
+        organizationId: true,
+        createdAt: true,
+      },
     });
   }
 
   private concertScope(user: AuthUser) {
-    if (user.role === 'ADMIN') return {};
+    if (user.role !== 'ORGANIZER') {
+      return { id: '00000000-0000-0000-0000-000000000000' };
+    }
+    if (!user.organizationId) {
+      return { organizerId: user.id };
+    }
     return {
       OR: [
-        { organizationId: user.organizationId || undefined },
+        { organizationId: user.organizationId },
         { organizerId: user.id },
       ],
     };
@@ -435,14 +491,8 @@ export class AdminService {
   }
 
   private resolveWritableOrganization(user: AuthUser, organizationId?: string): string {
-    if (user.role === 'ADMIN') {
-      if (!organizationId) {
-        throw new AppError(400, 'FORBIDDEN_RESOURCE', 'organizationId is required for ADMIN writes.');
-      }
-      return organizationId;
-    }
     if (user.role !== 'ORGANIZER' || !user.organizationId) {
-      throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ORGANIZER or ADMIN can manage organization resources.');
+      throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ORGANIZER can manage organization resources.');
     }
     if (organizationId && organizationId !== user.organizationId) {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage another organization.');
@@ -482,4 +532,3 @@ export class AdminService {
 }
 
 export const adminService = new AdminService();
-

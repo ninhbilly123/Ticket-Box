@@ -6,9 +6,9 @@ Member A owns account security and organizer administration for TicketBox. This 
 
 **Goals:**
 - Implement JWT-based authentication and refresh-token revocation.
-- Enforce RBAC for admin and protected APIs.
+- Enforce RBAC for organizer admin and protected APIs.
 - Enforce object-level authorization for concerts, organizations, orders, tickets, and check-in assignments.
-- Provide admin APIs for concerts, ticket types, inventory, staff assignments, whitelist email config, revenue, and users.
+- Provide organizer admin APIs for concerts, ticket types, inventory, staff assignments, whitelist email config, revenue, and check-in staff lookup.
 - Seed demo accounts with hashed passwords.
 
 **Non-Goals:**
@@ -41,8 +41,6 @@ Roles are stored as uppercase strings:
 - `AUDIENCE`
 - `ORGANIZER`
 - `CHECKIN_STAFF`
-- `ADMIN`
-
 Legacy lowercase roles from earlier seed data are treated as aliases during auth checks, but new seed data and admin writes use uppercase roles.
 
 ### 3. Database Model Extensions
@@ -115,4 +113,3 @@ No mailbox password or secret is stored as plain text.
 - **Express does not use Nest decorators**: The project is Express-based, so the implementation uses middleware and an OpenAPI JSON route instead of Nest `@ApiTags`/`@Roles` decorators.
 - **Existing modules use legacy role/status values**: This change normalizes writes to uppercase role strings and lowercase order/ticket status strings where existing schema expects string values.
 - **Payment table is not in the current Prisma schema**: This change does not add payment attempts because it belongs to the payment module owner.
-

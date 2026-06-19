@@ -180,17 +180,6 @@ async function main() {
 
   console.log('Creating organizations and users...');
   const demoOrg = await prisma.organization.create({ data: { name: 'Demo Organizer' } });
-  const mtpOrg = await prisma.organization.create({ data: { name: 'MTP Entertainment' } });
-
-  const admin = await prisma.user.create({
-    data: {
-      email: 'admin@example.com',
-      passwordHash,
-      fullName: 'TicketBox Admin',
-      role: 'ADMIN',
-      status: 'ACTIVE',
-    },
-  });
 
   const organizer = await prisma.user.create({
     data: {
@@ -200,18 +189,6 @@ async function main() {
       phone: '0987654321',
       role: 'ORGANIZER',
       organizationId: demoOrg.id,
-      status: 'ACTIVE',
-    },
-  });
-
-  const organizer2 = await prisma.user.create({
-    data: {
-      email: 'organizer2@example.com',
-      passwordHash,
-      fullName: 'MTP Organizer Manager',
-      phone: '0966778899',
-      role: 'ORGANIZER',
-      organizationId: mtpOrg.id,
       status: 'ACTIVE',
     },
   });
@@ -320,8 +297,8 @@ async function main() {
       name: 'MTP Special Night',
       venue: 'Trung tam Hoi nghi Quoc gia, Ha Noi',
       startAt: new Date(now.getTime() + 18 * 24 * 60 * 60 * 1000),
-      organizerId: organizer2.id,
-      organizationId: mtpOrg.id,
+      organizerId: organizer.id,
+      organizationId: demoOrg.id,
       artistId: artists[0].id,
       map: '/assets/seatmaps/mtp-special-seatmap.svg',
     },
@@ -530,9 +507,7 @@ async function main() {
   console.log('Seed completed.');
   console.log('Demo login password:', PASSWORD);
   console.table({
-    admin: admin.email,
     organizer: organizer.email,
-    organizer2: organizer2.email,
     staff: staff.email,
     audience: audience.email,
   });

@@ -61,9 +61,17 @@ The system SHALL allow organizers to update ticket inventory safely.
 ### Requirement: Staff Assignment
 The system SHALL allow organizers to assign `CHECKIN_STAFF` users to a concert and gate.
 
+#### Scenario: Organizer creates check-in staff account
+- **WHEN** an organizer creates a staff account with email, password, full name, and optional phone
+- **THEN** the system SHALL store the user as `CHECKIN_STAFF` in the organizer's organization.
+
 #### Scenario: Cannot assign non-staff user
 - **WHEN** an organizer attempts to assign a user whose role is not `CHECKIN_STAFF`
 - **THEN** the system SHALL reject the request with `FORBIDDEN_ROLE`.
+
+#### Scenario: Cannot assign staff outside organization
+- **WHEN** an organizer attempts to assign a staff user from another organization
+- **THEN** the system SHALL reject the request with `FORBIDDEN_RESOURCE`.
 
 #### Scenario: Staff can only scan assigned concert or gate
 - **WHEN** a staff user scans a concert or gate without assignment
@@ -98,8 +106,3 @@ The system SHALL allow organizers to view sales and revenue summaries for their 
 #### Scenario: Organizer cannot see another organization's revenue
 - **WHEN** an organizer requests revenue for another organization's concert
 - **THEN** the system SHALL reject the request with `FORBIDDEN_RESOURCE`.
-
-#### Scenario: Admin can see all revenue summaries
-- **WHEN** an admin requests revenue for any concert
-- **THEN** the system SHALL return the requested summary.
-

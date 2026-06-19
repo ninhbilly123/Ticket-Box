@@ -5,11 +5,9 @@ const roleAliases: Record<string, Role> = {
   organizer: 'ORGANIZER',
   gate_staff: 'CHECKIN_STAFF',
   checkin_staff: 'CHECKIN_STAFF',
-  admin: 'ADMIN',
   AUDIENCE: 'AUDIENCE',
   ORGANIZER: 'ORGANIZER',
   CHECKIN_STAFF: 'CHECKIN_STAFF',
-  ADMIN: 'ADMIN',
 };
 
 export function normalizeRole(role: string): Role {
@@ -27,4 +25,3 @@ export function isRole(role: string, expected: Role): boolean {
 export function roleIn(role: string, expected: Role[]): boolean {
   return expected.includes(normalizeRole(role));
 }
-

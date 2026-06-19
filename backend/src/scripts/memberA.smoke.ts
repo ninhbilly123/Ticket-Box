@@ -57,7 +57,6 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
-    const admin = await login(baseUrl, 'admin@example.com');
     const organizer = await login(baseUrl, 'organizer@example.com');
     const audience = await login(baseUrl, 'audience@example.com');
 
@@ -100,8 +99,41 @@ async function main() {
     });
     assert(revenue.status === 200, 'Organizer should view own revenue summary');
 
-    const users = await request(baseUrl, '/api/v1/admin/users', { token: admin.accessToken });
-    assert(users.status === 200, 'ADMIN should list users');
+    const staffUsers = await request<Array<{ id: string; role: string }>>(baseUrl, '/api/v1/admin/staff', {
+      token: organizer.accessToken,
+    });
+    assert(staffUsers.status === 200, 'Organizer should list check-in staff in own organization');
+    assert(
+      staffUsers.body.data?.every((user) => user.role === 'CHECKIN_STAFF'),
+      'Staff list should only include check-in staff'
+    );
+
+    const newStaffEmail = `smoke-staff-${Date.now()}@example.com`;
+    const createdStaff = await request<{ id: string; email: string; role: string }>(baseUrl, '/api/v1/admin/staff', {
+      method: 'POST',
+      token: organizer.accessToken,
+      body: JSON.stringify({
+        email: newStaffEmail,
+        password: 'Password123!',
+        fullName: 'Smoke Check-in Staff',
+        phone: '0909090909',
+      }),
+    });
+    assert(createdStaff.status === 201, 'Organizer should create check-in staff');
+    assert(createdStaff.body.data?.role === 'CHECKIN_STAFF', 'Created staff should have CHECKIN_STAFF role');
+
+    const createdAssignment = await request<{ id: string }>(
+      baseUrl,
+      `/api/v1/admin/concerts/${firstConcert.id}/staff-assignments`,
+      {
+        method: 'POST',
+        token: organizer.accessToken,
+        body: JSON.stringify({ staffId: createdStaff.body.data!.id, gateId: 'GATE-SMOKE' }),
+      }
+    );
+    assert(createdAssignment.status === 201, 'Organizer should assign newly created staff');
+    await prisma.staffAssignment.delete({ where: { id: createdAssignment.body.data!.id } });
+    await prisma.user.delete({ where: { id: createdStaff.body.data!.id } });
 
     const activeWhitelist = await request(baseUrl, '/api/v1/internal/whitelist-email-configs/active');
     assert(activeWhitelist.status === 200, 'Internal active whitelist API should work');

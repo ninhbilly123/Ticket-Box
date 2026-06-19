@@ -1,26 +1,26 @@
 ## Why
 
-TicketBox serves multiple user groups: audience members, organizers, check-in staff, and system admins. The current application exposes booking, payment, concert listing, and check-in APIs, but it does not yet have a consistent authentication, role-based access control, or admin management layer. Without that layer, users can pass raw user IDs in requests and access data or actions outside their responsibility.
+TicketBox serves three user groups from the project brief: audience members, organizers, and check-in staff. The current application exposes booking, payment, concert listing, and check-in APIs, but it does not yet have a consistent authentication, role-based access control, or organizer administration layer. Without that layer, users can pass raw user IDs in requests and access data or actions outside their responsibility.
 
 ## What Changes
 
 - **Authentication**: Add register, login, logout, optional refresh token, and current profile APIs.
-- **RBAC**: Add roles `AUDIENCE`, `ORGANIZER`, `CHECKIN_STAFF`, and `ADMIN`, plus JWT authentication middleware, role middleware, and current-user request context.
+- **RBAC**: Add roles `AUDIENCE`, `ORGANIZER`, and `CHECKIN_STAFF`, plus JWT authentication middleware, role middleware, and current-user request context.
 - **Object-level authorization**: Add an authorization service that checks ownership and assignments before allowing access to concerts, orders, tickets, organizations, and check-in operations.
-- **Admin management**: Add APIs for concert management, ticket type management, inventory configuration, staff assignments, whitelist email configuration, revenue summary, and admin user management.
+- **Organizer admin management**: Add APIs for concert management, ticket type management, inventory configuration, staff assignments, whitelist email configuration, revenue summary, and organization staff lookup.
 
 ## Capabilities
 
 ### New Capabilities
 
 - `auth-rbac`: Account registration, login, logout, refresh tokens, JWT protected APIs, role checks, and object-level authorization helpers.
-- `admin-management`: Organizer/admin APIs for concerts, ticket types, inventory, staff assignments, whitelist email configuration, revenue summaries, and user role/status management.
+- `admin-management`: Organizer admin APIs for concerts, ticket types, inventory, staff assignments, whitelist email configuration, revenue summaries, and check-in staff lookup.
 
 ### Modified Capabilities
 
 - `ticket-booking`: Protected ownership checks can use authenticated user context instead of trusting client-provided user IDs.
 - `ticket-scanning`: Check-in staff can be authorized by assignment instead of a temporary default staff ID.
-- `online-payment`: Order/ticket visibility can be restricted to the authenticated owner or authorized admin/organizer.
+- `online-payment`: Order/ticket visibility can be restricted to the authenticated owner or authorized organizer.
 
 ## Impact
 
@@ -35,4 +35,3 @@ TicketBox serves multiple user groups: audience members, organizers, check-in st
   - No deep admin UI is required in this change. Existing clients can call the new APIs directly during demo/testing.
 - **Out of scope**:
   - Deep reservation/payment implementation, offline sync internals, notification workers, AI Artist Bio workers, and CSV import workers remain owned by other members.
-

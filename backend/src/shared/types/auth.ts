@@ -1,4 +1,4 @@
-export type Role = 'AUDIENCE' | 'ORGANIZER' | 'CHECKIN_STAFF' | 'ADMIN';
+export type Role = 'AUDIENCE' | 'ORGANIZER' | 'CHECKIN_STAFF';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 
 export interface AuthUser {
@@ -16,4 +16,3 @@ export interface JwtPayload {
   role: Role;
   organizationId?: string | null;
 }
-

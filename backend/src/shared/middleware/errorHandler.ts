@@ -22,13 +22,32 @@ export function errorHandler(
     });
   }
 
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({
+      success: false,
+      errorCode: 'BAD_REQUEST',
+      message: 'Request JSON không hợp lệ.',
+      timestamp: new Date().toISOString(),
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Request JSON không hợp lệ.',
+        timestamp: new Date().toISOString(),
+        path: req.originalUrl,
+      },
+    });
+  }
+
   if (err instanceof AppError) {
+    const timestamp = new Date().toISOString();
     return res.status(err.statusCode).json({
       success: false,
+      errorCode: err.errorCode,
+      message: err.message,
+      timestamp,
       error: {
         code: err.errorCode,
         message: err.message,
-        timestamp: new Date().toISOString(),
+        timestamp,
         path: req.originalUrl,
       },
     });

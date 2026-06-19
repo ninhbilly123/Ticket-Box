@@ -1,0 +1,38 @@
+- [x] Inspect existing OpenSpec specs for ticket-booking / seat-reservation / online-payment
+- [x] Create OpenSpec change for hold-order expiration
+- [x] Write proposal.md
+- [x] Write design.md
+- [x] Write specs/hold-order/spec.md
+- [x] Implement POST /api/v1/orders/hold
+- [x] Require Idempotency-Key header
+- [x] Use userId from JWT, not from request body
+- [x] Validate concert, ticket type, quantity and sale time
+- [x] Implement transaction with SELECT FOR UPDATE on TicketInventory
+- [x] Prevent oversell
+- [x] Enforce maxPerAccount
+- [x] Create Order status pending
+- [x] Create OrderItem
+- [x] Publish RabbitMQ delayed expire order job
+- [x] Implement expire order worker
+- [x] Expire pending order after createdAt + 10 minutes
+- [x] Return tickets to inventory when order expires
+- [x] Skip expire if order already paid
+- [x] Invalidate availability cache if present
+- [x] Add Swagger/OpenAPI docs if project uses Swagger
+- [x] Add tests/manual test notes
+
+## Manual Test Notes
+
+- `npm run build` passes.
+- `npx prisma validate` passes.
+- `npm run test:member-a` passes.
+- `POST /api/v1/orders/hold` with JWT and `Idempotency-Key` creates an order with status `pending`.
+- Hold response returns `orderId`, `orderStatus`, `totalAmount`, `expiresInSeconds`, and held `items`.
+- Hold flow does not create `Ticket` rows or QR data.
+- Inventory hold verified: `availableQuantity` decreases by quantity and `reservedQuantity` increases by quantity.
+- Idempotency verified: repeating the same `Idempotency-Key` returns the same `orderId` and does not reserve inventory again.
+- Missing `Idempotency-Key` returns `400 MISSING_IDEMPOTENCY_KEY`.
+- Max-per-account verified with `USER_TICKET_LIMIT_EXCEEDED`.
+- Expire worker verified by moving a pending order `createdAt` older than 10 minutes and publishing an immediate expire job; order becomes `expired` and inventory is restored.
+- Oversell prevention verified with a temporary concert/ticket type containing 1 available ticket and 2 concurrent hold requests; exactly one request succeeds and the other returns `TICKET_SOLD_OUT`.
+- RabbitMQ delayed queue uses `orders.expire.delay.queue` with dead-letter routing into `orders.expire.queue`; test messages were purged after verification.

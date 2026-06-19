@@ -12,7 +12,7 @@ const getApiBaseUrl = () => {
 
 export const API_BASE_URL = getApiBaseUrl();
 
-export type Role = 'ADMIN' | 'ORGANIZER' | 'CHECKIN_STAFF' | 'AUDIENCE';
+export type Role = 'ORGANIZER' | 'CHECKIN_STAFF' | 'AUDIENCE';
 
 export interface SessionUser {
   id: string;
@@ -102,7 +102,7 @@ export interface WhitelistConfig {
   organization?: Organization;
 }
 
-export interface AdminUser {
+export interface StaffUser {
   id: string;
   email: string;
   fullName: string;
@@ -279,21 +279,14 @@ export const adminApi = {
   revenueSummary(token: string, concertId: string) {
     return apiRequest<RevenueSummary>(`/admin/concerts/${concertId}/revenue-summary`, { token });
   },
-  listUsers(token: string) {
-    return apiRequest<AdminUser[]>('/admin/users', { token });
+  listStaff(token: string) {
+    return apiRequest<StaffUser[]>('/admin/staff', { token });
   },
-  updateUserRole(token: string, userId: string, role: Role) {
-    return apiRequest<AdminUser>(`/admin/users/${userId}/role`, {
-      method: 'PATCH',
+  createStaff(token: string, payload: Record<string, unknown>) {
+    return apiRequest<StaffUser>('/admin/staff', {
+      method: 'POST',
       token,
-      body: JSON.stringify({ role }),
-    });
-  },
-  updateUserStatus(token: string, userId: string, status: 'ACTIVE' | 'DISABLED') {
-    return apiRequest<AdminUser>(`/admin/users/${userId}/status`, {
-      method: 'PATCH',
-      token,
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(payload),
     });
   },
 };

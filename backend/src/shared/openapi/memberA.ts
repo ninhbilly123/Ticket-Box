@@ -3,7 +3,7 @@ export const memberAOpenApi = {
   info: {
     title: 'TicketBox Member A APIs',
     version: '1.0.0',
-    description: 'Authentication, RBAC, object authorization, and admin management APIs.',
+    description: 'Authentication, RBAC, object authorization, and organizer admin APIs.',
   },
   servers: [{ url: 'http://localhost:3000/api/v1' }],
   components: {
@@ -17,13 +17,14 @@ export const memberAOpenApi = {
   },
   tags: [
     { name: 'Auth' },
+    { name: 'Public Concerts' },
+    { name: 'Orders' },
     { name: 'Admin Concerts' },
     { name: 'Ticket Types' },
     { name: 'Inventory' },
     { name: 'Staff Assignments' },
     { name: 'Whitelist Email Config' },
     { name: 'Revenue' },
-    { name: 'Admin Users' },
   ],
   paths: {
     '/auth/register': { post: { tags: ['Auth'], summary: 'Register audience account' } },
@@ -31,6 +32,130 @@ export const memberAOpenApi = {
     '/auth/logout': { post: { tags: ['Auth'], summary: 'Logout and revoke refresh token' } },
     '/auth/refresh': { post: { tags: ['Auth'], summary: 'Rotate refresh token and return new tokens' } },
     '/auth/me': { get: { tags: ['Auth'], security: [{ bearerAuth: [] }], summary: 'Get current profile' } },
+    '/concerts': {
+      get: {
+        tags: ['Public Concerts'],
+        summary: 'List published concerts with Redis cache and Redis-backed rate limit',
+        parameters: [
+          { name: 'search', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'artist', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'date', in: 'query', required: false, schema: { type: 'string', format: 'date' } },
+          { name: 'location', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Concert list returned from cache or PostgreSQL fallback' },
+          '429': { description: 'Too many concert listing requests' },
+        },
+      },
+    },
+    '/concerts/{id}': {
+      get: {
+        tags: ['Public Concerts'],
+        summary: 'Get public concert detail with Redis cache and short-lived availability composition',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': { description: 'Public concert detail returned from Redis cache or PostgreSQL fallback' },
+          '404': { description: 'Concert not found or not public' },
+          '429': { description: 'Too many concert detail requests' },
+        },
+      },
+    },
+    '/concerts/{id}/availability': {
+      get: {
+        tags: ['Public Concerts'],
+        summary: 'Get short-lived ticket availability for display only',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': { description: 'Ticket availability by ticket type' },
+          '404': { description: 'Concert not found or not public' },
+          '429': { description: 'Too many availability requests' },
+        },
+      },
+    },
+    '/concerts/{concertId}/waiting-room/join': {
+      post: {
+        tags: ['Public Concerts'],
+        security: [{ bearerAuth: [] }],
+        summary: 'Join the Redis waiting room for a hot concert',
+        parameters: [
+          { name: 'concertId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': { description: 'WAITING with queue position, or READY with checkout token' },
+          '401': { description: 'Authentication required' },
+          '404': { description: 'Concert unavailable or waiting room not enabled' },
+        },
+      },
+    },
+    '/concerts/{concertId}/waiting-room/status': {
+      get: {
+        tags: ['Public Concerts'],
+        security: [{ bearerAuth: [] }],
+        summary: 'Get waiting room position or checkout token readiness',
+        parameters: [
+          { name: 'concertId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': { description: 'WAITING with queue position, or READY with checkout token' },
+          '401': { description: 'Authentication required' },
+          '404': { description: 'Waiting room membership not found' },
+        },
+      },
+    },
+    '/orders/hold': {
+      post: {
+        tags: ['Orders'],
+        security: [{ bearerAuth: [] }],
+        summary: 'Hold selected tickets and create a pending order with rate limit and optional waiting-room token',
+        parameters: [
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } },
+          {
+            name: 'Checkout-Token',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Required only when the concert is configured as a hot concert in the waiting room.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['concertId', 'items'],
+                properties: {
+                  concertId: { type: 'string', format: 'uuid' },
+                  items: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['ticketTypeId', 'quantity'],
+                      properties: {
+                        ticketTypeId: { type: 'string', format: 'uuid' },
+                        quantity: { type: 'integer', minimum: 1 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Pending order created or idempotent previous order returned' },
+          '400': { description: 'Invalid hold request, sale window, sold out, or max-per-account violation' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'NOT_YOUR_TURN or CHECKOUT_TOKEN_EXPIRED for hot concerts' },
+          '409': { description: 'Idempotency key already used for another hold' },
+          '429': { description: 'TOO_MANY_REQUESTS from Redis hold-order rate limit' },
+        },
+      },
+    },
     '/admin/concerts': {
       get: { tags: ['Admin Concerts'], security: [{ bearerAuth: [] }], summary: 'List manageable concerts' },
       post: { tags: ['Admin Concerts'], security: [{ bearerAuth: [] }], summary: 'Create draft concert' },
@@ -61,6 +186,10 @@ export const memberAOpenApi = {
       get: { tags: ['Staff Assignments'], security: [{ bearerAuth: [] }], summary: 'List staff assignments' },
       post: { tags: ['Staff Assignments'], security: [{ bearerAuth: [] }], summary: 'Assign check-in staff' },
     },
+    '/admin/staff': {
+      get: { tags: ['Staff Assignments'], security: [{ bearerAuth: [] }], summary: 'List check-in staff in organizer organization' },
+      post: { tags: ['Staff Assignments'], security: [{ bearerAuth: [] }], summary: 'Create check-in staff account in organizer organization' },
+    },
     '/admin/staff-assignments/{id}': {
       delete: { tags: ['Staff Assignments'], security: [{ bearerAuth: [] }], summary: 'Delete staff assignment' },
     },
@@ -81,15 +210,5 @@ export const memberAOpenApi = {
     '/admin/concerts/{id}/sales-stats': {
       get: { tags: ['Revenue'], security: [{ bearerAuth: [] }], summary: 'Get sales stats' },
     },
-    '/admin/users': {
-      get: { tags: ['Admin Users'], security: [{ bearerAuth: [] }], summary: 'List users' },
-    },
-    '/admin/users/{id}/role': {
-      patch: { tags: ['Admin Users'], security: [{ bearerAuth: [] }], summary: 'Update user role' },
-    },
-    '/admin/users/{id}/status': {
-      patch: { tags: ['Admin Users'], security: [{ bearerAuth: [] }], summary: 'Update user status' },
-    },
   },
 };
-

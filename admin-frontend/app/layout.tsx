@@ -2,7 +2,7 @@ import './globals.css';
 
 export const metadata = {
   title: 'TicketBox Admin',
-  description: 'TicketBox organizer and admin dashboard',
+  description: 'TicketBox organizer dashboard',
 };
 
 export default function RootLayout({
@@ -16,4 +16,3 @@ export default function RootLayout({
     </html>
   );
 }
-

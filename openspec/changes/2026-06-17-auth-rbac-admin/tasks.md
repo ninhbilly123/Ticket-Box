@@ -11,7 +11,7 @@
 
 - [x] 2.1 Extend Prisma schema for organizations, refresh tokens, inventory, staff assignments, whitelist configs, audit logs, and user admin fields.
 - [x] 2.2 Add/update migration.
-- [x] 2.3 Seed admin, organizer, staff, and audience accounts with hashed passwords.
+- [x] 2.3 Seed organizer, staff, and audience accounts with hashed passwords.
 
 ## 3. Auth & RBAC Backend
 
@@ -28,7 +28,7 @@
 - [x] 4.4 Implement staff assignment APIs.
 - [x] 4.5 Implement whitelist email config APIs.
 - [x] 4.6 Implement revenue summary and sales stats APIs.
-- [x] 4.7 Implement admin user APIs.
+- [x] 4.7 Implement organizer staff lookup APIs.
 - [x] 4.8 Add OpenAPI documentation endpoint for Member A APIs.
 
 ## 5. Verification

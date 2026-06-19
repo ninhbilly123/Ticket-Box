@@ -10,12 +10,16 @@ import { adminRoutes } from './modules/admin/admin.routes';
 import { internalRoutes } from './modules/admin/internal.routes';
 import { concertRoutes } from './modules/concert/concert.routes';
 import { ticketRoutes } from './modules/ticket/ticket.routes';
+import { orderRoutes } from './modules/order/order.routes';
 import { paymentRoutes } from './modules/payment/payment.routes';
 import { checkinRoutes } from './modules/checkin/checkin.routes';
 import { errorHandler } from './shared/middleware/errorHandler';
 import { memberAOpenApi } from './shared/openapi/memberA';
 import { startCleanupWorker } from './workers/cleanup.worker';
 import { startNotificationWorker } from './workers/notification.worker';
+import { startConcertListingCacheInvalidationWorker } from './workers/concert-listing-cache-invalidation.worker';
+import { startOrderExpirationWorker } from './workers/order-expiration.worker';
+import { startWaitingRoomWorker } from './workers/waiting-room.worker';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +41,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/internal', internalRoutes);
 app.use('/api/v1/concerts', concertRoutes);
 app.use('/api/v1/tickets', ticketRoutes);
+app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/checkins', checkinRoutes);
 
@@ -52,6 +57,9 @@ export function startServer() {
     console.log(`[Server] TicketBox backend running on port ${PORT}`);
     startCleanupWorker();
     startNotificationWorker();
+    startConcertListingCacheInvalidationWorker();
+    startOrderExpirationWorker();
+    startWaitingRoomWorker();
   });
 }
 

@@ -1,6 +1,19 @@
 import { prisma } from '../../shared/lib/prisma';
-import redisClient from '../../shared/lib/redis';
+import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
+import {
+  ConcertListFilters,
+  readConcertListCache,
+  writeConcertListCache,
+} from './concert-listing-cache';
+import {
+  readConcertDetailCache,
+  readTicketAvailabilityCache,
+  writeConcertDetailCache,
+  writeTicketAvailabilityCache,
+} from './concert-detail-cache';
+
+const PUBLIC_CONCERT_STATUSES = ['PUBLISHED', 'ON_SALE'];
 
 export class ConcertService {
   /**
@@ -11,8 +24,8 @@ export class ConcertService {
     
     try {
       // 1. Check Redis Cache
-      if (redisClient.isOpen) {
-        const cached = await redisClient.get(cacheKey);
+      if (isRedisReady()) {
+        const cached = await runRedisOperation(() => redisClient.get(cacheKey));
         if (cached !== null) {
           return parseInt(cached, 10);
         }
@@ -21,25 +34,17 @@ export class ConcertService {
       console.error(`[Redis Error] Failed to read cache for ${ticketTypeId}:`, err);
     }
 
-    // 2. Cache Miss: Query PostgreSQL
-    // Tickets with status valid or used are considered sold/unavailable.
-    const soldCount = await prisma.ticket.count({
-      where: {
-        orderItem: {
-          ticketTypeId,
-        },
-        status: {
-          in: ['valid', 'used'],
-        },
-      },
+    // 2. Cache Miss: Prefer inventory counters so pending holds reduce availability.
+    const inventory = await prisma.ticketInventory.findUnique({
+      where: { ticketTypeId },
+      select: { availableQuantity: true },
     });
-
-    const remaining = Math.max(0, totalQuantity - soldCount);
+    const remaining = inventory?.availableQuantity ?? totalQuantity;
 
     try {
       // 3. Write back to Redis cache with 30 seconds TTL
-      if (redisClient.isOpen) {
-        await redisClient.setEx(cacheKey, 30, remaining.toString());
+      if (isRedisReady()) {
+        await runRedisOperation(() => redisClient.setEx(cacheKey, 30, remaining.toString()));
       }
     } catch (err) {
       console.error(`[Redis Error] Failed to set cache for ${ticketTypeId}:`, err);
@@ -51,12 +56,18 @@ export class ConcertService {
   /**
    * Fetch all upcoming concerts with optional search & filters
    */
-  public async getConcerts(filters: {
-    search?: string;
-    artist?: string;
-    date?: string;
-    location?: string;
-  }) {
+  public async getConcerts(filters: ConcertListFilters) {
+    const cached = await readConcertListCache<unknown[]>(filters);
+    if (cached) {
+      return cached;
+    }
+
+    const concerts = await this.getConcertsFromDatabase(filters);
+    await writeConcertListCache(filters, concerts);
+    return concerts;
+  }
+
+  private async getConcertsFromDatabase(filters: ConcertListFilters) {
     const { search, artist, date, location } = filters;
     const whereClause: any = {
       status: { in: ['PUBLISHED', 'ON_SALE', 'published'] },
@@ -169,8 +180,47 @@ export class ConcertService {
    * Fetch single concert details with seat layout and remaining tickets
    */
   public async getConcertById(id: string) {
-    const concert = await prisma.concert.findUnique({
-      where: { id },
+    const cached = await readConcertDetailCache<any>(id);
+    const detail = cached || await this.getConcertDetailFromDatabase(id);
+
+    if (!cached) {
+      await writeConcertDetailCache(id, detail);
+    }
+
+    const availability = await this.getConcertAvailability(id);
+    const availabilityByTicketType = new Map(
+      availability.ticketTypes.map((ticketType) => [ticketType.id, ticketType.remaining])
+    );
+
+    return {
+      ...detail,
+      ticketTypes: detail.ticketTypes.map((ticketType: any) => ({
+        ...ticketType,
+        remaining: availabilityByTicketType.get(ticketType.id) ?? 0,
+      })),
+    };
+  }
+
+  public async getConcertAvailability(id: string) {
+    const cached = await readTicketAvailabilityCache<{
+      concertId: string;
+      ticketTypes: Array<{ id: string; name: string; remaining: number }>;
+    }>(id);
+    if (cached) {
+      return cached;
+    }
+
+    const availability = await this.getConcertAvailabilityFromDatabase(id);
+    await writeTicketAvailabilityCache(id, availability);
+    return availability;
+  }
+
+  private async getConcertDetailFromDatabase(id: string) {
+    const concert = await prisma.concert.findFirst({
+      where: {
+        id,
+        status: { in: PUBLIC_CONCERT_STATUSES },
+      },
       include: {
         ticketTypes: true,
         artists: {
@@ -185,35 +235,73 @@ export class ConcertService {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
     }
 
-    if (!['PUBLISHED', 'ON_SALE', 'published'].includes(concert.status)) {
-      throw new AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
-    }
-
-    const ticketTypesWithRemaining = await Promise.all(
-      concert.ticketTypes.map(async (tt) => {
-        const remaining = await this.getRemainingTickets(tt.id, tt.totalQuantity);
-        return {
-          id: tt.id,
-          name: tt.name,
-          price: Number(tt.price),
-          totalQuantity: tt.totalQuantity,
-          maxLimitPerUser: tt.maxPerAccount,
-          remaining,
-        };
-      })
-    );
-
     const artistNames = concert.artists.map((ca) => ca.artist.name).join(', ');
 
     return {
       id: concert.id,
       title: concert.name,
+      name: concert.name,
       description: concert.description,
       artist: artistNames || 'Nhiều nghệ sĩ',
       dateTime: concert.startAt.toISOString(),
+      startAt: concert.startAt.toISOString(),
+      saleOpenAt: concert.saleOpenAt.toISOString(),
+      status: concert.status,
       location: concert.venue,
+      venue: concert.venue,
       seatMapUrl: concert.svgSeatingMap || '',
-      ticketTypes: ticketTypesWithRemaining,
+      ticketTypes: concert.ticketTypes.map((tt) => ({
+        id: tt.id,
+        name: tt.name,
+        price: Number(tt.price),
+        totalQuantity: tt.totalQuantity,
+        maxLimitPerUser: tt.maxPerAccount,
+        maxPerAccount: tt.maxPerAccount,
+        saleOpenAt: tt.saleOpenAt ? tt.saleOpenAt.toISOString() : null,
+        saleCloseAt: tt.saleCloseAt ? tt.saleCloseAt.toISOString() : null,
+        status: tt.status,
+      })),
+    };
+  }
+
+  private async getConcertAvailabilityFromDatabase(id: string) {
+    const concert = await prisma.concert.findFirst({
+      where: {
+        id,
+        status: { in: PUBLIC_CONCERT_STATUSES },
+      },
+      select: {
+        id: true,
+        ticketTypes: {
+          select: {
+            id: true,
+            name: true,
+            totalQuantity: true,
+            reservedQuantity: true,
+            soldQuantity: true,
+            inventory: true,
+          },
+        },
+      },
+    });
+
+    if (!concert) {
+      throw new AppError(404, 'CONCERT_NOT_FOUND', 'Không tìm thấy thông tin concert yêu cầu.');
+    }
+
+    return {
+      concertId: concert.id,
+      ticketTypes: concert.ticketTypes.map((tt) => {
+        const remaining = tt.inventory
+          ? tt.inventory.availableQuantity
+          : Math.max(0, tt.totalQuantity - tt.reservedQuantity - tt.soldQuantity);
+
+        return {
+          id: tt.id,
+          name: tt.name,
+          remaining,
+        };
+      }),
     };
   }
 }

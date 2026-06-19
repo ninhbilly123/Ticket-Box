@@ -1,7 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { adminService } from './admin.service';
-import { Role } from '../../shared/types/auth';
 
 const concertCreateSchema = z.object({
   name: z.string().min(1),
@@ -11,7 +10,6 @@ const concertCreateSchema = z.object({
   description: z.string().optional(),
   svgSeatingMap: z.string().optional(),
   organizationId: z.string().uuid().optional(),
-  organizerId: z.string().uuid().optional(),
 });
 
 const ticketTypeSchema = z.object({
@@ -32,6 +30,13 @@ const staffAssignmentSchema = z.object({
   gateId: z.string().min(1),
 });
 
+const staffCreateSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  fullName: z.string().min(1),
+  phone: z.string().optional(),
+});
+
 const whitelistSchema = z.object({
   organizationId: z.string().uuid().optional(),
   concertId: z.string().uuid().optional(),
@@ -39,14 +44,6 @@ const whitelistSchema = z.object({
   allowedSenderEmail: z.string().min(3),
   subjectKeyword: z.string().min(1),
   status: z.string().optional(),
-});
-
-const roleSchema = z.object({
-  role: z.enum(['AUDIENCE', 'ORGANIZER', 'CHECKIN_STAFF', 'ADMIN']),
-});
-
-const statusSchema = z.object({
-  status: z.enum(['ACTIVE', 'DISABLED']),
 });
 
 export class AdminController {
@@ -244,33 +241,22 @@ export class AdminController {
     }
   }
 
-  public async listUsers(req: Request, res: Response, next: NextFunction) {
+  public async listStaffUsers(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await adminService.listUsers(req.user!);
+      const result = await adminService.listStaffUsers(req.user!);
       return res.status(200).json({ success: true, data: result });
     } catch (error) {
       return next(error);
     }
   }
 
-  public async updateUserRole(req: Request, res: Response, next: NextFunction) {
+  public async createStaffUser(req: Request, res: Response, next: NextFunction) {
     try {
-      const dto = roleSchema.parse(req.body);
-      const result = await adminService.updateUserRole(req.user!, req.params.id, dto.role as Role);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
-  }
-
-  public async updateUserStatus(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = statusSchema.parse(req.body);
-      const result = await adminService.updateUserStatus(req.user!, req.params.id, dto.status);
-      return res.status(200).json({ success: true, data: result });
+      const dto = staffCreateSchema.parse(req.body);
+      const result = await adminService.createStaffUser(req.user!, dto);
+      return res.status(201).json({ success: true, data: result });
     } catch (error) {
       return next(error);
     }
   }
 }
-

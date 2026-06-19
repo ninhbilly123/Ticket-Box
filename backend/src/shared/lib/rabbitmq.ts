@@ -1,6 +1,6 @@
 import amqp from 'amqplib';
 
-const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:password123@localhost:5672';
+const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
 
 let connection: any = null;
 let channel: any = null;

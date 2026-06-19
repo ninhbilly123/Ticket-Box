@@ -1,0 +1,17 @@
+- [x] Inspect existing OpenSpec specs
+- [x] Create OpenSpec change for hold order protection
+- [x] Add Redis rate limit for POST /api/v1/orders/hold
+- [x] Limit by userId
+- [x] Limit by IP
+- [x] Return 429 TOO_MANY_REQUESTS when exceeded
+- [x] Add waiting room join API
+- [x] Add waiting room status API
+- [x] Store queue in Redis Sorted Set
+- [x] Implement worker to release users per minute
+- [x] Generate checkout token with TTL
+- [x] Require Checkout-Token for hot concerts
+- [x] Validate checkout token before hold order transaction
+- [x] Support config for waiting-room-enabled concerts
+- [x] Do not use RabbitMQ for waiting room
+- [x] Add .env.example config
+- [x] Add manual test notes
