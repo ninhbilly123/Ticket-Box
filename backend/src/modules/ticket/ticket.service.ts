@@ -23,9 +23,9 @@ export class TicketService {
       // 1. Acquire pessimistic lock on the TicketType record to prevent concurrent updates on the inventory
       const ticketTypes: any[] = await tx.$queryRaw`
         SELECT id, price, total_quantity as "totalQuantity", max_per_account as "maxLimitPerUser"
-        FROM ticket_types 
-        WHERE id = ${ticketTypeId} 
-        LIMIT 1 
+        FROM ticket_types
+        WHERE id = ${ticketTypeId}
+        LIMIT 1
         FOR UPDATE
       `;
 
@@ -126,7 +126,7 @@ export class TicketService {
 
       const mappedTickets = tickets.map((t) => ({
         ...t,
-        seatNumber: `GHE-${t.qrCode.slice(-4)}`, // Mock seatNumber for frontend display compatibility
+        seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`, // Mock seatNumber for frontend display compatibility
       }));
 
       // 6. Invalidate Redis Cache (asynchronous/non-blocking delete)
@@ -168,7 +168,7 @@ export class TicketService {
     const flatTickets = order.orderItems.flatMap((item) =>
       item.tickets.map((t) => ({
         ...t,
-        seatNumber: `GHE-${t.qrCode.slice(-4)}`,
+        seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`,
       }))
     );
 
@@ -176,5 +176,50 @@ export class TicketService {
       order,
       tickets: flatTickets,
     };
+  }
+
+  /**
+   * Retrieve order/ticket purchase history for a specific user
+   */
+  public async getHistory(userId: string) {
+    const orders = await prisma.order.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        concert: true,
+        orderItems: {
+          include: {
+            ticketType: true,
+            tickets: true,
+          },
+        },
+        payments: true,
+      },
+    });
+
+    return orders.map((order) => {
+      const tickets = order.orderItems.flatMap((item) =>
+        item.tickets.map((t) => ({
+          id: t.id,
+          qrCode: t.qrCode,
+          status: t.status,
+          seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`,
+          ticketType: item.ticketType.name,
+          price: item.unitPrice,
+        }))
+      );
+
+      return {
+        orderId: order.id,
+        concertName: order.concert.name,
+        concertVenue: order.concert.venue,
+        concertStartAt: order.concert.startAt,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        createdAt: order.createdAt,
+        payments: order.payments,
+        tickets,
+      };
+    });
   }
 }
