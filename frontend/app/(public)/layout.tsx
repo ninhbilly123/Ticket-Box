@@ -1,4 +1,6 @@
 import '../globals.css';
+import CustomerHeader from '../../components/CustomerHeader';
+import { AuthProvider } from '../../lib/auth-context';
 
 export const metadata = {
   title: 'TicketBox Portal',
@@ -12,7 +14,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>
+          <CustomerHeader />
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   )
 }

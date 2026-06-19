@@ -78,11 +78,15 @@ export async function fetchConcertById(id: string): Promise<Concert> {
 export interface AuthSession {
   accessToken: string;
   refreshToken: string;
+  expiresAt?: string;
   user: {
     id: string;
     email: string;
     fullName: string;
     role: string;
+    phone?: string | null;
+    organizationId?: string | null;
+    status?: string;
   };
 }
 
@@ -93,6 +97,50 @@ export async function login(params: { email: string; password: string }): Promis
     body: JSON.stringify(params),
   });
   const json = await readApiJson(res, 'Đăng nhập thất bại');
+  return json.data;
+}
+
+export async function register(params: {
+  email: string;
+  password: string;
+  fullName: string;
+  phone?: string;
+}): Promise<AuthSession> {
+  const res = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const json = await readApiJson(res, 'Register failed');
+  return json.data;
+}
+
+export async function refreshAuth(refreshToken: string): Promise<AuthSession> {
+  const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  const json = await readApiJson(res, 'Session expired');
+  return json.data;
+}
+
+export async function logoutAuth(refreshToken?: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  }).catch(() => {});
+}
+
+export async function fetchCurrentUser(accessToken: string): Promise<AuthSession['user']> {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: 'no-store',
+  });
+  const json = await readApiJson(res, 'Cannot load profile');
   return json.data;
 }
 

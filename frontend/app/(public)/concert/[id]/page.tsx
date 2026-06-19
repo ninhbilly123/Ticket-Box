@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -12,7 +12,6 @@ import {
   CreditCard,
   ExternalLink,
   History,
-  LogIn,
   MapPin,
   Music,
   RefreshCw,
@@ -35,10 +34,8 @@ import {
   holdOrder,
   initiatePayment,
   joinWaitingRoom,
-  login,
 } from '../../../../lib/api';
-
-const SESSION_STORAGE_KEY = 'ticketbox_customer_session';
+import { useAuth } from '../../../../lib/auth-context';
 
 function formatCurrency(value: number) {
   return Number(value).toLocaleString('vi-VN') + ' đ';
@@ -60,16 +57,13 @@ function getErrorCode(error: unknown) {
 
 export default function ConcertDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const concertId = params.id as string;
+  const { session, status: authStatus } = useAuth();
 
   const [concert, setConcert] = useState<Concert | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [session, setSession] = useState<AuthSession | null>(null);
-  const [email, setEmail] = useState('audience@example.com');
-  const [password, setPassword] = useState('Password123!');
-  const [authLoading, setAuthLoading] = useState(false);
 
   const [selectedTicketTypeId, setSelectedTicketTypeId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -127,19 +121,6 @@ export default function ConcertDetailPage() {
   }, [concertId]);
 
   useEffect(() => {
-    const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!rawSession) return;
-
-    try {
-      const parsed = JSON.parse(rawSession) as AuthSession;
-      setSession(parsed);
-      setEmail(parsed.user.email);
-    } catch {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
     if (!session || waitingStatus?.status !== 'WAITING') return;
 
     const timer = window.setInterval(async () => {
@@ -162,26 +143,10 @@ export default function ConcertDetailPage() {
     return () => window.clearInterval(timer);
   }, [concertId, session, waitingStatus?.status]);
 
-  async function signIn() {
-    setAuthLoading(true);
-    setHoldError(null);
-
-    try {
-      const nextSession = await login({ email, password });
-      setSession(nextSession);
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
-      return nextSession;
-    } catch (err) {
-      setHoldError((err as Error).message || 'Đăng nhập thất bại.');
-      throw err;
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
   async function getSessionForCheckout() {
     if (session) return session;
-    return signIn();
+    router.push(`/login?redirect=${encodeURIComponent(`/concert/${concertId}`)}`);
+    throw new Error('Vui lòng đăng nhập để giữ vé.');
   }
 
   async function loadHistory(activeSession = session) {
@@ -433,35 +398,28 @@ export default function ConcertDetailPage() {
             </h2>
 
             <div className="mb-6 rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-              <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs text-gray-500 uppercase font-bold">Tài khoản</p>
-                  <p className="text-sm font-semibold text-white">{session ? session.user.email : 'Chưa đăng nhập'}</p>
+                  <p className="text-sm font-semibold text-white">
+                    {session ? session.user.email : authStatus === 'loading' ? 'Đang kiểm tra phiên...' : 'Chưa đăng nhập'}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={signIn}
-                  disabled={authLoading}
-                  className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-xs font-bold text-white flex items-center gap-1.5"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  {session ? 'Đổi' : 'Đăng nhập'}
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
-                  placeholder="Email"
-                />
-                <input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  type="password"
-                  className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
-                  placeholder="Mật khẩu"
-                />
+                {session ? (
+                  <Link
+                    href="/profile"
+                    className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white flex items-center"
+                  >
+                    Hồ sơ
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/login?redirect=${encodeURIComponent(`/concert/${concert.id}`)}`}
+                    className="h-9 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center"
+                  >
+                    Đăng nhập
+                  </Link>
+                )}
               </div>
             </div>
 
