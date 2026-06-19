@@ -1,7 +1,51 @@
+import * as crypto from 'crypto';
 import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
+
+// Helper function to generate VNPAY time format (yyyyMMddHHmmss) in GMT+7
+function getVNPTime(): string {
+  const date = new Date();
+  // Vietnam timezone is GMT+7
+  const tzOffset = 7 * 60; // offset in minutes
+  const vnTime = new Date(date.getTime() + tzOffset * 60 * 1000 + date.getTimezoneOffset() * 60 * 1000);
+  
+  const pad = (num: number) => String(num).padStart(2, '0');
+  
+  const year = vnTime.getFullYear();
+  const month = pad(vnTime.getMonth() + 1);
+  const day = pad(vnTime.getDate());
+  const hour = pad(vnTime.getHours());
+  const minute = pad(vnTime.getMinutes());
+  const second = pad(vnTime.getSeconds());
+  
+  return `${year}${month}${day}${hour}${minute}${second}`;
+}
+
+// Helper function to sort object parameters alphabetically by key (needed for VNPAY hashing)
+export function sortObject(obj: any) {
+  const sorted: any = {};
+  const str = [];
+  let key;
+  for (key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      str.push(encodeURIComponent(key));
+    }
+  }
+  str.sort();
+  for (key = 0; key < str.length; key++) {
+    sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, "+");
+  }
+  return sorted;
+}
+
+// Helper to stringify parameters into key=value joined by &
+function stringifyParams(obj: any): string {
+  return Object.entries(obj)
+    .map(([key, val]) => `${key}=${val}`)
+    .join('&');
+}
 
 export class PaymentService {
   /**
@@ -62,13 +106,22 @@ export class PaymentService {
   }
 
   /**
-   * Generate mock payment checkout URL and create Payment record
+   * Generate real VNPAY payment redirect URL and create Payment record
    */
-  public async createPaymentUrl(params: { orderId: string; gateway: 'vnpay' | 'momo' }) {
-    const { orderId, gateway } = params;
+  public async createPaymentUrl(params: {
+    orderId: string;
+    gateway: 'vnpay' | 'momo';
+    returnUrl: string;
+    ipAddr: string;
+  }) {
+    const { orderId, gateway, returnUrl, ipAddr } = params;
 
     // 1. Check Circuit Breaker before proceeding
     await this.checkCircuitBreaker(gateway);
+
+    if (gateway === 'momo') {
+      throw new AppError(400, 'GATEWAY_DISABLED', 'Cổng thanh toán MoMo tạm thời bị vô hiệu hóa. Vui lòng sử dụng VNPAY.');
+    }
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -82,9 +135,8 @@ export class PaymentService {
       throw new AppError(400, 'INVALID_ORDER_STATUS', 'Đơn hàng không ở trạng thái chờ thanh toán.');
     }
 
-    // Simulate API call to the gateway
-    // We mock a 10% chance of connection timeout to VNPAY/MoMo APIs to demonstrate the Circuit Breaker!
-    const simulateFailure = Math.random() < 0.15;
+    // Simulate VNPAY connection timeout check (Circuit Breaker demo)
+    const simulateFailure = Math.random() < 0.05; // 5% failure simulation rate
     if (simulateFailure) {
       await this.recordFailure(gateway);
       throw new AppError(504, 'GATEWAY_TIMEOUT', `Không thể kết nối đến máy chủ cổng thanh toán ${gateway.toUpperCase()}.`);
@@ -93,30 +145,223 @@ export class PaymentService {
     // API call success -> reset breaker
     await this.recordSuccess(gateway);
 
-    // 2. Generate a mock redirect URL using the orderId directly (since there is no Payment table)
-    const mockRedirectUrl = `http://localhost:3000/api/v1/payments/mock-checkout?paymentId=${orderId}&gateway=${gateway}&amount=${order.totalAmount}`;
+    // 2. Create the Payment record in Database
+    const payment = await prisma.payment.create({
+      data: {
+        orderId: order.id,
+        paymentGateway: 'vnpay',
+        amount: order.totalAmount,
+        status: 'PENDING',
+      },
+    });
+
+    // 3. Generate VNPAY sandbox payment URL
+    const tmnCode = process.env.VNPAY_TMN_CODE;
+    const secretKey = process.env.VNPAY_HASH_SECRET;
+    const vnpUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
+
+    if (!tmnCode || !secretKey) {
+      throw new AppError(500, 'CONFIG_ERROR', 'Chưa cấu hình VNPAY_TMN_CODE hoặc VNPAY_HASH_SECRET trong file .env');
+    }
+
+    const vnpParams: Record<string, string> = {
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
+      vnp_TmnCode: tmnCode,
+      vnp_Locale: 'vn',
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef: payment.id,
+      vnp_OrderInfo: `Thanh toan don hang ${order.id}`,
+      vnp_OrderType: 'other',
+      vnp_Amount: String(Math.round(Number(order.totalAmount) * 100)),
+      vnp_ReturnUrl: returnUrl,
+      vnp_IpAddr: ipAddr,
+      vnp_CreateDate: getVNPTime(),
+    };
+
+    const sortedParams = sortObject(vnpParams);
+    const signData = stringifyParams(sortedParams);
+    const hmac = crypto.createHmac('sha512', secretKey);
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
+    sortedParams['vnp_SecureHash'] = signed;
+
+    const paymentUrl = `${vnpUrl}?${stringifyParams(sortedParams)}`;
 
     return {
-      paymentId: orderId,
-      paymentUrl: mockRedirectUrl,
+      paymentId: payment.id,
+      paymentUrl,
     };
   }
 
   /**
-   * Process webhook transaction results from MoMo/VNPAY
+   * Process webhook transaction result from VNPAY IPN (Webhook)
    */
-  public async processPaymentWebhook(params: {
-    paymentId: string;
-    status: 'SUCCESS' | 'FAILED';
-    transactionId?: string;
-    responseCode?: string;
-  }) {
-    const { paymentId, status, transactionId, responseCode } = params;
+  public async processVNPAYIpn(query: any) {
+    const secureHash = query.vnp_SecureHash;
 
+    const secretKey = process.env.VNPAY_HASH_SECRET;
+    if (!secretKey) {
+      return { RspCode: '99', Message: 'Config error' };
+    }
+
+    // 1. Verify VNPAY Signature
+    const vnpParams: Record<string, string> = {};
+    for (const key of Object.keys(query)) {
+      if (key !== 'vnp_SecureHash' && key !== 'vnp_SecureHashType') {
+        vnpParams[key] = String(query[key]);
+      }
+    }
+
+    const sortedParams = sortObject(vnpParams);
+    const signData = stringifyParams(sortedParams);
+    const hmac = crypto.createHmac('sha512', secretKey);
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
+
+    if (secureHash !== signed) {
+      console.error('[VNPAY IPN] Signature validation failed.');
+      return { RspCode: '97', Message: 'Signature failure' };
+    }
+
+    const paymentId = vnpParams['vnp_TxnRef'];
+    const responseCode = vnpParams['vnp_ResponseCode'];
+    const vnpAmountStr = vnpParams['vnp_Amount'];
+    const transactionNo = vnpParams['vnp_TransactionNo'];
+
+    // 2. Fetch payment record
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+    });
+
+    if (!payment) {
+      console.error(`[VNPAY IPN] Payment record ${paymentId} not found.`);
+      return { RspCode: '01', Message: 'Order not found' };
+    }
+
+    // 3. Verify amount (VNPAY amount is multiplied by 100)
+    const expectedAmountCent = Math.round(Number(payment.amount) * 100);
+    if (Number(vnpAmountStr) !== expectedAmountCent) {
+      console.error(`[VNPAY IPN] Amount mismatch: expected ${expectedAmountCent}, got ${vnpAmountStr}`);
+      return { RspCode: '04', Message: 'Amount mismatch' };
+    }
+
+    // 4. Verify payment is still pending (Idempotency)
+    if (payment.status !== 'PENDING') {
+      console.log(`[VNPAY IPN] Payment ${paymentId} already confirmed.`);
+      return { RspCode: '02', Message: 'Order already confirmed' };
+    }
+
+    // 5. Update DB using atomic transaction
+    const status = responseCode === '00' ? 'SUCCESS' : 'FAILED';
+    await this.processPaymentStatusUpdate(paymentId, status, transactionNo, responseCode);
+
+    return { RspCode: '00', Message: 'Confirm Success' };
+  }
+
+  /**
+   * Process return result from VNPAY redirection (GET vnpay-return)
+   */
+  public async processVNPAYReturn(query: any) {
+    const secureHash = query.vnp_SecureHash;
+
+    const secretKey = process.env.VNPAY_HASH_SECRET;
+    if (!secretKey) {
+      throw new AppError(500, 'CONFIG_ERROR', 'Chưa cấu hình VNPAY_HASH_SECRET trong file .env');
+    }
+
+    // 1. Verify VNPAY Signature
+    const vnpParams: Record<string, string> = {};
+    for (const key of Object.keys(query)) {
+      if (key !== 'vnp_SecureHash' && key !== 'vnp_SecureHashType') {
+        vnpParams[key] = String(query[key]);
+      }
+    }
+
+    const sortedParams = sortObject(vnpParams);
+    const signData = stringifyParams(sortedParams);
+    const hmac = crypto.createHmac('sha512', secretKey);
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
+
+    if (secureHash !== signed) {
+      console.error('[VNPAY Return] Signature validation failed.');
+      return { success: false, message: 'Signature failure' };
+    }
+
+    const paymentId = vnpParams['vnp_TxnRef'];
+    const responseCode = vnpParams['vnp_ResponseCode'];
+    const transactionNo = vnpParams['vnp_TransactionNo'];
+
+    // 2. Fetch payment record
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+    });
+
+    if (!payment) {
+      return { success: false, message: 'Payment record not found' };
+    }
+
+    // 3. Process status update if still pending
+    if (payment.status === 'PENDING') {
+      const status = responseCode === '00' ? 'SUCCESS' : 'FAILED';
+      try {
+        await this.processPaymentStatusUpdate(paymentId, status, transactionNo, responseCode);
+      } catch (err) {
+        console.error('[VNPAY Return] Error processing payment update:', err);
+      }
+    }
+
+    // 4. Retrieve latest status
+    const updatedPayment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { order: true },
+    });
+
+    return {
+      success: responseCode === '00',
+      payment: updatedPayment,
+    };
+  }
+
+  /**
+   * Helper method to atomically update Payment, Order, Tickets, TicketInventory,
+   * invalidate Redis caches, and publish notifications to RabbitMQ
+   */
+  public async processPaymentStatusUpdate(
+    paymentId: string,
+    status: 'SUCCESS' | 'FAILED',
+    transactionId?: string,
+    responseCode?: string
+  ) {
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Get order record (using paymentId as orderId)
-      const order = await tx.order.findUnique({
+      // 1. Get payment record
+      const payment = await tx.payment.findUnique({
         where: { id: paymentId },
+      });
+
+      if (!payment) {
+        throw new AppError(404, 'PAYMENT_RECORD_NOT_FOUND', 'Không tìm thấy bản ghi thanh toán.');
+      }
+
+      if (payment.status !== 'PENDING') {
+        return {
+          processed: false,
+          status: payment.status,
+          orderId: payment.orderId,
+        };
+      }
+
+      // Update payment
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status,
+          transactionId,
+          responseCode,
+        },
+      });
+
+      // 2. Get order record
+      const order = await tx.order.findUnique({
+        where: { id: payment.orderId },
         include: { orderItems: { include: { tickets: true } } },
       });
 
@@ -124,8 +369,8 @@ export class PaymentService {
         throw new AppError(404, 'ORDER_RECORD_NOT_FOUND', 'Không tìm thấy bản ghi đơn hàng tương ứng.');
       }
 
-      // If already processed, return early
-      if (!['pending', 'PENDING'].includes(order.status)) {
+      // If already processed order, return early
+      if (order.status !== 'pending' && order.status !== 'PENDING') {
         return {
           processed: false,
           status: order.status,
@@ -136,7 +381,7 @@ export class PaymentService {
         };
       }
 
-      // 2. Handle Order & Ticket updates
+      // 3. Handle Order & Ticket updates
       if (status === 'SUCCESS') {
         // Successful payment: transition order to PAID
         await tx.order.update({
@@ -147,23 +392,47 @@ export class PaymentService {
           },
         });
 
-        await tx.ticket.updateMany({
+        // Activate tickets and generate seat numbers
+        const tickets = await tx.ticket.findMany({
           where: {
             orderItem: {
               orderId: order.id,
             },
           },
-          data: { status: 'valid' },
         });
 
-        console.log(`[Payment Webhook] Order ${order.id} marked as PAID. Tickets activated.`);
+        for (let i = 0; i < tickets.length; i++) {
+          const t = tickets[i];
+          const seatNum = t.seatNumber || `S-${Math.floor(10 + Math.random() * 89)}-${i + 1}`;
+          await tx.ticket.update({
+            where: { id: t.id },
+            data: {
+              status: 'valid',
+              seatNumber: seatNum,
+            },
+          });
+        }
+
+        // Update TicketInventory (reserved -> sold)
+        for (const item of order.orderItems) {
+          await tx.ticketInventory.update({
+            where: { ticketTypeId: item.ticketTypeId },
+            data: {
+              reservedQuantity: { decrement: item.quantity },
+              soldQuantity: { increment: item.quantity },
+            },
+          });
+        }
+
+        console.log(`[Payment Service] Order ${order.id} marked as PAID. Tickets activated.`);
       } else {
-        // Failed payment: transition order to CANCELLED and delete tickets to release seats
+        // Failed payment: transition order to FAILED
         await tx.order.update({
           where: { id: order.id },
           data: { status: 'failed' },
         });
 
+        // Delete tickets to release seats
         await tx.ticket.deleteMany({
           where: {
             orderItem: {
@@ -172,10 +441,21 @@ export class PaymentService {
           },
         });
 
-        console.log(`[Payment Webhook] Order ${order.id} marked as CANCELLED. Held seats deleted.`);
+        // Update TicketInventory (release reserved)
+        for (const item of order.orderItems) {
+          await tx.ticketInventory.update({
+            where: { ticketTypeId: item.ticketTypeId },
+            data: {
+              reservedQuantity: { decrement: item.quantity },
+              availableQuantity: { increment: item.quantity },
+            },
+          });
+        }
+
+        console.log(`[Payment Service] Order ${order.id} marked as FAILED. Reserved seats released.`);
       }
 
-      // 3. Invalidate Redis Cache for each affected ticket type
+      // 4. Invalidate Redis Cache for each affected ticket type
       const ticketTypeIds = Array.from(new Set(order.orderItems.map((item) => item.ticketTypeId)));
       for (const ttId of ticketTypeIds) {
         const cacheKey = `ticket_inventory:${ttId}`;
@@ -188,20 +468,29 @@ export class PaymentService {
         }
       }
 
+      // Re-fetch tickets for RabbitMQ messages
+      const updatedTickets = await tx.ticket.findMany({
+        where: {
+          orderItem: {
+            orderId: order.id,
+          },
+        },
+      });
+
       return {
         processed: true,
         status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
         orderId: order.id,
         userId: order.userId,
         concertId: order.concertId,
-        tickets: status === 'SUCCESS' ? order.orderItems.flatMap((item) => item.tickets) : [],
+        tickets: updatedTickets,
       };
     });
 
-    // 4. Publish messages to RabbitMQ after transaction successfully commits
+    // 5. Publish messages to RabbitMQ after transaction successfully commits
     if (result.processed) {
       if (result.status === 'SUCCESS') {
-        for (const ticket of result.tickets) {
+        for (const ticket of (result.tickets || [])) {
           await publishToQueue('ticketbox_notifications', {
             type: 'purchase_confirm',
             payload: {

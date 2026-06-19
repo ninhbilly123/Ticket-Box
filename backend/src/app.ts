@@ -48,7 +48,7 @@ app.get('/api/v1/openapi/member-a.json', (req, res) => {
 app.use(errorHandler);
 
 export function startServer() {
-  return app.listen(PORT, () => {
+  return app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`[Server] TicketBox backend running on port ${PORT}`);
     startCleanupWorker();
     startNotificationWorker();

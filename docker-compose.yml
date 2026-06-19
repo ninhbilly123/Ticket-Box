@@ -33,6 +33,18 @@
         - rabbitmq_data:/var/lib/rabbitmq
       restart: always
 
+    ngrok:
+      image: ngrok/ngrok:latest
+      container_name: ticketbox-ngrok
+      ports:
+        - "4040:4040"
+      environment:
+        - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      command: http host.docker.internal:3000
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      restart: always
+
   volumes:
     postgres_data:
     redis_data:
