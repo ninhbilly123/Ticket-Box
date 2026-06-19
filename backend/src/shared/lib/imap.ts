@@ -7,6 +7,13 @@ export interface CsvMailAttachment {
   content: Buffer;
 }
 
+export class ImapMailboxUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImapMailboxUnavailableError';
+  }
+}
+
 function normalizeEnvSecret(value: string | undefined): string | undefined {
   return value?.replace(/\s+/g, '');
 }
@@ -66,7 +73,7 @@ export async function fetchCsvAttachmentsFromMailbox(): Promise<CsvMailAttachmen
     logger: false,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
-    socketTimeout: 30000,
+    socketTimeout: 60000,
   });
   client.on('error', (error: Error) => {
     console.warn(`[IMAP] Connection error - ${error.message}`);
@@ -80,23 +87,27 @@ export async function fetchCsvAttachmentsFromMailbox(): Promise<CsvMailAttachmen
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown IMAP connection error';
     console.warn(`[IMAP] Cannot connect to mailbox ${host}:${process.env.IMAP_PORT || '993'} - ${message}`);
-    return [];
+    throw new ImapMailboxUnavailableError(message);
   }
 
   try {
-    await client.mailboxOpen(mailbox);
-    const unseenUids = await client.search({ seen: false }, { uid: true });
-    if (!unseenUids || unseenUids.length === 0) {
-      return [];
-    }
-
     const lock = await client.getMailboxLock(mailbox);
     try {
-      for await (const message of client.fetch(
+      const searchQuery = host.includes('gmail.com')
+        ? { gmailraw: 'is:unread has:attachment filename:csv newer_than:14d' }
+        : { seen: false };
+      const unseenUids = await client.search(searchQuery, { uid: true });
+      if (!unseenUids || unseenUids.length === 0) {
+        return [];
+      }
+
+      const messages = await client.fetchAll(
         unseenUids,
         { uid: true, envelope: true, bodyStructure: true },
         { uid: true }
-      )) {
+      );
+
+      for (const message of messages) {
         const senderEmail = message.envelope?.from?.[0]?.address?.toLowerCase();
         if (!senderEmail) {
           continue;
@@ -104,14 +115,12 @@ export async function fetchCsvAttachmentsFromMailbox(): Promise<CsvMailAttachmen
 
         const csvParts = collectCsvParts(message.bodyStructure as MailBodyPart | undefined);
         if (csvParts.length === 0) {
-          await client.messageFlagsAdd(String(message.uid), ['\\Seen'], { uid: true });
           continue;
         }
 
         const downloadedParts = await client.downloadMany(
-          String(message.uid),
-          csvParts.map((part) => part.part),
-          { uid: true }
+          String(message.seq),
+          csvParts.map((part) => part.part)
         );
 
         const messageId = message.envelope?.messageId || `${mailbox}:${message.uid}`;
@@ -129,7 +138,7 @@ export async function fetchCsvAttachmentsFromMailbox(): Promise<CsvMailAttachmen
           });
         }
 
-        await client.messageFlagsAdd(String(message.uid), ['\\Seen'], { uid: true });
+        await client.messageFlagsAdd(String(message.seq), ['\\Seen']);
       }
     } finally {
       lock.release();
@@ -137,7 +146,7 @@ export async function fetchCsvAttachmentsFromMailbox(): Promise<CsvMailAttachmen
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown IMAP fetch error';
     console.warn(`[IMAP] Cannot fetch CSV attachments - ${message}`);
-    return [];
+    throw new ImapMailboxUnavailableError(message);
   } finally {
     try {
       await client.logout();

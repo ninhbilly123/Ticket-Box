@@ -102,6 +102,17 @@ export class VipGuestSyncService {
     });
   }
 
+  public async createMailboxErrorReport(errorMessage: string): Promise<void> {
+    await prisma.guestImportJob.create({
+      data: {
+        status: 'FAILED',
+        errorMessage: `Khong doc duoc mailbox IMAP: ${errorMessage}`,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      },
+    });
+  }
+
   public async createImportJobFromAttachment(params: {
     senderEmail: string;
     messageId: string;

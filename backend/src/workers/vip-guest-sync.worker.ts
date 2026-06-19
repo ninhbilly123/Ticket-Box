@@ -1,10 +1,11 @@
 import { Queue, Worker, Job } from 'bullmq';
 import cron from 'node-cron';
 import { queueConnection } from '../shared/lib/queue';
-import { fetchCsvAttachmentsFromMailbox } from '../shared/lib/imap';
+import { fetchCsvAttachmentsFromMailbox, ImapMailboxUnavailableError } from '../shared/lib/imap';
 import { VipGuestSyncService } from '../modules/vip-guest-sync/vip-guest-sync.service';
 
 const vipGuestSyncService = new VipGuestSyncService();
+let isPollingMailbox = false;
 
 export const vipGuestImportQueue = new Queue('vipGuestImportQueue', {
   connection: queueConnection,
@@ -23,7 +24,25 @@ vipGuestImportWorker.on('failed', (job, err) => {
 });
 
 export async function pollSponsorMailbox(): Promise<void> {
-  const attachments = await fetchCsvAttachmentsFromMailbox();
+  if (isPollingMailbox) {
+    console.warn('[VipGuestSyncWorker] Previous mailbox poll is still running. Skipping this tick.');
+    return;
+  }
+
+  isPollingMailbox = true;
+  let attachments;
+  try {
+    attachments = await fetchCsvAttachmentsFromMailbox();
+  } catch (error: unknown) {
+    if (error instanceof ImapMailboxUnavailableError) {
+      await vipGuestSyncService.createMailboxErrorReport(error.message);
+      return;
+    }
+    throw error;
+  } finally {
+    isPollingMailbox = false;
+  }
+
   let queuedCount = 0;
 
   for (const attachment of attachments) {
