@@ -1,137 +1,353 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { Calendar, MapPin, Music, User, ShoppingCart, ArrowLeft, RefreshCw, CheckCircle2, AlertTriangle, ExternalLink } from 'lucide-react';
-import { Concert, fetchConcertById, bookTickets, BookTicketsResponse, initiatePayment, fetchOrderById } from '../../../../lib/api';
+import { useParams } from 'next/navigation';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  Clock3,
+  CreditCard,
+  ExternalLink,
+  History,
+  LogIn,
+  MapPin,
+  Music,
+  RefreshCw,
+  ShieldCheck,
+  ShoppingCart,
+  Ticket,
+} from 'lucide-react';
 import SeatMap from '../../../../components/SeatMap';
+import {
+  AuthSession,
+  BookTicketsResponse,
+  Concert,
+  HoldOrderResponse,
+  TicketHistoryItem,
+  WaitingRoomStatus,
+  fetchConcertById,
+  fetchOrderById,
+  fetchTicketHistory,
+  fetchWaitingRoomStatus,
+  holdOrder,
+  initiatePayment,
+  joinWaitingRoom,
+  login,
+} from '../../../../lib/api';
+
+const SESSION_STORAGE_KEY = 'ticketbox_customer_session';
+
+function formatCurrency(value: number) {
+  return Number(value).toLocaleString('vi-VN') + ' đ';
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getErrorCode(error: unknown) {
+  return (error as Error & { errorCode?: string })?.errorCode;
+}
 
 export default function ConcertDetailPage() {
   const params = useParams();
-  const router = useRouter();
-  const id = params.id as string;
+  const concertId = params.id as string;
 
   const [concert, setConcert] = useState<Concert | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Form States
-  const [userId, setUserId] = useState('user-test-01'); // Prefilled mock userId
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [email, setEmail] = useState('audience@example.com');
+  const [password, setPassword] = useState('Password123!');
+  const [authLoading, setAuthLoading] = useState(false);
+
   const [selectedTicketTypeId, setSelectedTicketTypeId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
-  const [gateway, setGateway] = useState<'vnpay' | 'momo'>('vnpay'); // Payment gateway
-  
-  // Action States
-  const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookingError, setBookingError] = useState<string | null>(null);
-  const [bookingSuccess, setBookingSuccess] = useState<BookTicketsResponse | null>(null);
+
+  const [waitingStatus, setWaitingStatus] = useState<WaitingRoomStatus | null>(null);
+  const [waitingLoading, setWaitingLoading] = useState(false);
+
+  const [holdLoading, setHoldLoading] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [holdResult, setHoldResult] = useState<HoldOrderResponse | null>(null);
+
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  
-  // Status check states
+  const [orderSnapshot, setOrderSnapshot] = useState<BookTicketsResponse | null>(null);
   const [checkingPayment, setCheckingPayment] = useState(false);
 
-  // Load concert details
-  const loadConcert = async (showSpinner = true) => {
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [history, setHistory] = useState<TicketHistoryItem[]>([]);
+
+  const selectedTicketType = useMemo(
+    () => concert?.ticketTypes.find((ticketType) => ticketType.id === selectedTicketTypeId) || null,
+    [concert, selectedTicketTypeId]
+  );
+
+  const maxSelectableQuantity = selectedTicketType
+    ? Math.max(1, Math.min(selectedTicketType.remaining, selectedTicketType.maxLimitPerUser))
+    : 1;
+
+  const paidTickets = orderSnapshot?.tickets || [];
+  const orderStatus = orderSnapshot?.order.status || holdResult?.orderStatus;
+
+  async function loadConcert(showSpinner = true) {
     if (showSpinner) setLoading(true);
     setError(null);
+
     try {
-      const data = await fetchConcertById(id);
+      const data = await fetchConcertById(concertId);
       setConcert(data);
-      
-      // Auto select the first available ticket type if none selected
+
       if (!selectedTicketTypeId && data.ticketTypes.length > 0) {
-        const firstAvailable = data.ticketTypes.find((tt) => tt.remaining > 0);
-        if (firstAvailable) {
-          setSelectedTicketTypeId(firstAvailable.id);
-        } else {
-          setSelectedTicketTypeId(data.ticketTypes[0].id);
-        }
+        const firstAvailable = data.ticketTypes.find((ticketType) => ticketType.remaining > 0);
+        setSelectedTicketTypeId((firstAvailable || data.ticketTypes[0]).id);
       }
-    } catch (err: any) {
-      setError(err.message || 'Không thể tải chi tiết concert.');
+    } catch (err) {
+      setError((err as Error).message || 'Không thể tải chi tiết concert.');
     } finally {
       if (showSpinner) setLoading(false);
     }
-  };
+  }
 
   useEffect(() => {
-    if (id) {
+    if (concertId) {
       loadConcert();
     }
-  }, [id]);
+  }, [concertId]);
 
-  const selectedTicketType = concert?.ticketTypes.find((tt) => tt.id === selectedTicketTypeId);
+  useEffect(() => {
+    const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!rawSession) return;
 
-  const handleBook = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTicketTypeId || !concert) return;
+    try {
+      const parsed = JSON.parse(rawSession) as AuthSession;
+      setSession(parsed);
+      setEmail(parsed.user.email);
+    } catch {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  }, []);
 
-    setBookingLoading(true);
-    setBookingError(null);
-    setBookingSuccess(null);
+  useEffect(() => {
+    if (!session || waitingStatus?.status !== 'WAITING') return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await fetchWaitingRoomStatus({
+          concertId,
+          accessToken: session.accessToken,
+        });
+        setWaitingStatus(status);
+        if (status.status === 'READY') {
+          setHoldError(null);
+        }
+      } catch (err) {
+        if (getErrorCode(err) !== 'WAITING_ROOM_NOT_FOUND') {
+          console.error('Failed to poll waiting room:', err);
+        }
+      }
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [concertId, session, waitingStatus?.status]);
+
+  async function signIn() {
+    setAuthLoading(true);
+    setHoldError(null);
+
+    try {
+      const nextSession = await login({ email, password });
+      setSession(nextSession);
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+      return nextSession;
+    } catch (err) {
+      setHoldError((err as Error).message || 'Đăng nhập thất bại.');
+      throw err;
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function getSessionForCheckout() {
+    if (session) return session;
+    return signIn();
+  }
+
+  async function loadHistory(activeSession = session) {
+    if (!activeSession) return;
+    setHistoryLoading(true);
+
+    try {
+      const data = await fetchTicketHistory(activeSession.accessToken);
+      setHistory(data);
+    } catch (err) {
+      setHoldError((err as Error).message || 'Không thể tải lịch sử đơn hàng.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function prepareWaitingRoom(activeSession: AuthSession) {
+    if (waitingStatus?.status === 'READY') {
+      return waitingStatus.checkoutToken;
+    }
+
+    setWaitingLoading(true);
+
+    try {
+      const status = await joinWaitingRoom({
+        concertId,
+        accessToken: activeSession.accessToken,
+      });
+      setWaitingStatus(status);
+
+      if (status.status === 'READY') {
+        return status.checkoutToken;
+      }
+
+      setHoldError(`Bạn đang ở hàng chờ vị trí ${status.position}. Hệ thống sẽ tự kiểm tra lượt.`);
+      return null;
+    } catch (err) {
+      if (getErrorCode(err) === 'WAITING_ROOM_NOT_FOUND') {
+        setWaitingStatus(null);
+        return undefined;
+      }
+      throw err;
+    } finally {
+      setWaitingLoading(false);
+    }
+  }
+
+  async function refreshWaitingRoom() {
+    if (!session) return;
+    setWaitingLoading(true);
+
+    try {
+      const status = await fetchWaitingRoomStatus({
+        concertId,
+        accessToken: session.accessToken,
+      });
+      setWaitingStatus(status);
+      if (status.status === 'READY') {
+        setHoldError(null);
+      }
+    } catch (err) {
+      setHoldError((err as Error).message || 'Không thể kiểm tra hàng chờ.');
+    } finally {
+      setWaitingLoading(false);
+    }
+  }
+
+  async function handleHoldOrder(event: React.FormEvent) {
+    event.preventDefault();
+    if (!concert || !selectedTicketType) return;
+
+    setHoldLoading(true);
+    setHoldError(null);
+    setHoldResult(null);
+    setOrderSnapshot(null);
     setPaymentUrl(null);
 
     try {
-      // 1. Create the pending order
-      const result = await bookTickets({
-        userId,
+      const activeSession = await getSessionForCheckout();
+      const checkoutToken = await prepareWaitingRoom(activeSession);
+      if (checkoutToken === null) return;
+
+      const result = await holdOrder({
         concertId: concert.id,
-        ticketTypeId: selectedTicketTypeId,
+        ticketTypeId: selectedTicketType.id,
         quantity,
+        accessToken: activeSession.accessToken,
+        checkoutToken,
+        idempotencyKey: `hold-${concert.id}-${selectedTicketType.id}-${Date.now()}`,
       });
 
-      // 2. Initiate payment with Idempotency-Key
-      const idempotencyKey = `idem-pay-${result.order.id}`;
-      const paymentData = await initiatePayment({
-        orderId: result.order.id,
-        gateway,
-        idempotencyKey,
-      });
-
-      setBookingSuccess(result);
-      setPaymentUrl(paymentData.paymentUrl);
-
-      // 3. Open the checkout simulator in a new tab
-      window.open(paymentData.paymentUrl, '_blank');
-
-      // Reload concert details in the background to update ticket counts
-      loadConcert(false);
-    } catch (err: any) {
-      setBookingError(err.message || 'Đặt vé thất bại.');
+      setHoldResult(result);
+      await loadConcert(false);
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (code === 'NOT_YOUR_TURN' || code === 'CHECKOUT_TOKEN_EXPIRED') {
+        try {
+          const activeSession = await getSessionForCheckout();
+          const status = await joinWaitingRoom({
+            concertId,
+            accessToken: activeSession.accessToken,
+          });
+          setWaitingStatus(status);
+          setHoldError(status.status === 'WAITING' ? `Bạn đang ở hàng chờ vị trí ${status.position}.` : null);
+        } catch (joinErr) {
+          setHoldError((joinErr as Error).message || 'Chưa tới lượt mua vé.');
+        }
+      } else {
+        setHoldError((err as Error).message || 'Giữ vé thất bại.');
+      }
     } finally {
-      setBookingLoading(false);
+      setHoldLoading(false);
     }
-  };
+  }
 
-  // Poll or check order status manually
-  const checkPaymentStatus = async () => {
-    if (!bookingSuccess?.order?.id) return;
-    setCheckingPayment(true);
+  async function handleStartPayment() {
+    if (!holdResult) return;
+
+    setPaymentLoading(true);
+    setHoldError(null);
+
     try {
-      const updatedOrder = await fetchOrderById(bookingSuccess.order.id);
-      setBookingSuccess((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          order: {
-            ...prev.order,
-            status: updatedOrder.order.status,
-          },
-        };
+      const payment = await initiatePayment({
+        orderId: holdResult.orderId,
+        gateway: 'vnpay',
+        idempotencyKey: `pay-${holdResult.orderId}`,
       });
-      loadConcert(false); // Sync ticket inventory counts
-    } catch (err: any) {
-      console.error('Failed to verify order status:', err);
+      setPaymentUrl(payment.paymentUrl);
+      window.open(payment.paymentUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setHoldError((err as Error).message || 'Không thể tạo yêu cầu thanh toán.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
+  async function checkPaymentStatus() {
+    if (!holdResult) return;
+
+    setCheckingPayment(true);
+    setHoldError(null);
+
+    try {
+      const updatedOrder = await fetchOrderById(holdResult.orderId);
+      setOrderSnapshot(updatedOrder);
+      await loadConcert(false);
+      await loadHistory();
+    } catch (err) {
+      setHoldError((err as Error).message || 'Không thể kiểm tra trạng thái đơn hàng.');
     } finally {
       setCheckingPayment(false);
     }
-  };
+  }
+
+  function resetCheckout() {
+    setHoldResult(null);
+    setOrderSnapshot(null);
+    setPaymentUrl(null);
+    setHoldError(null);
+    setWaitingStatus(null);
+  }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-3 text-white">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         <p className="text-gray-400 text-sm">Đang tải chi tiết sự kiện...</p>
       </div>
     );
@@ -143,7 +359,7 @@ export default function ConcertDetailPage() {
         <AlertTriangle className="w-12 h-12 text-red-500 mb-3" />
         <h2 className="text-xl font-bold mb-2">Đã xảy ra lỗi</h2>
         <p className="text-gray-400 text-sm max-w-sm mb-6">{error || 'Không tìm thấy dữ liệu sự kiện.'}</p>
-        <Link href="/" className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-5 py-2.5 rounded-xl font-semibold transition-colors">
+        <Link href="/" className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">
           Quay lại trang chủ
         </Link>
       </div>
@@ -152,13 +368,13 @@ export default function ConcertDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans pb-20">
-      {/* Navbar Banner */}
       <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between border-b border-gray-900">
         <Link href="/" className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Quay lại danh sách
         </Link>
         <button
+          type="button"
           onClick={() => loadConcert(false)}
           className="text-xs text-indigo-400 hover:text-white transition-colors flex items-center gap-1"
         >
@@ -168,17 +384,10 @@ export default function ConcertDetailPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Column: Concert Info & SeatMap SVG (8 columns) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Info Card */}
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
-            <h1 className="text-2xl md:text-3xl font-extrabold text-white mb-4">
-              {concert.title}
-            </h1>
-            <p className="text-sm text-gray-400 mb-6 leading-relaxed">
-              {concert.description || 'Không có mô tả chi tiết cho concert này.'}
-            </p>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-white mb-4">{concert.title}</h1>
+            <p className="text-sm text-gray-400 mb-6 leading-relaxed">{concert.description || 'Concert chưa có mô tả.'}</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-gray-300 border-t border-gray-800 pt-6">
               <div className="flex items-center gap-2">
@@ -192,15 +401,7 @@ export default function ConcertDetailPage() {
                 <Calendar className="w-4 h-4 text-indigo-400" />
                 <div>
                   <div className="text-gray-500 text-[10px] uppercase">Thời gian</div>
-                  <span className="font-semibold">
-                    {new Date(concert.dateTime).toLocaleDateString('vi-VN', {
-                      day: 'numeric',
-                      month: 'numeric',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
+                  <span className="font-semibold">{formatDateTime(concert.dateTime)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -213,91 +414,89 @@ export default function ConcertDetailPage() {
             </div>
           </div>
 
-          {/* SVG SeatMap */}
           <SeatMap
             ticketTypes={concert.ticketTypes}
             selectedTicketTypeId={selectedTicketTypeId}
-            onSelectTicketType={(id) => {
-              setSelectedTicketTypeId(id);
-              setBookingSuccess(null);
-              setBookingError(null);
-              setPaymentUrl(null);
+            onSelectTicketType={(ticketTypeId) => {
+              setSelectedTicketTypeId(ticketTypeId);
+              setQuantity(1);
+              resetCheckout();
             }}
           />
         </div>
 
-        {/* Right Column: Order Form (5 columns) */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
             <h2 className="text-lg font-bold text-white mb-6 border-b border-gray-800 pb-3 flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-indigo-400" />
-              Thông tin đặt mua vé
+              Đặt vé
             </h2>
 
-            {/* Booking Form */}
-            <form onSubmit={handleBook} className="space-y-5">
-              
-              {/* User ID Field for Testing Limits */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5 font-semibold flex items-center gap-1">
-                  <User className="w-3.5 h-3.5 text-indigo-400" />
-                  Mã tài khoản (User ID) để test giới hạn:
-                </label>
-                <input
-                  type="text"
-                  value={userId}
-                  onChange={(e) => {
-                    setUserId(e.target.value);
-                    setBookingSuccess(null);
-                    setBookingError(null);
-                    setPaymentUrl(null);
-                  }}
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-2 text-sm text-white focus:border-indigo-500 outline-none"
-                  placeholder="Nhập User ID..."
-                  required
-                />
-                <p className="text-[10px] text-gray-500 mt-1">
-                  * Nhập cùng một User ID để thử giới hạn cộng dồn (Per-user Limit) khi mua nhiều đơn.
-                </p>
+            <div className="mb-6 rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase font-bold">Tài khoản</p>
+                  <p className="text-sm font-semibold text-white">{session ? session.user.email : 'Chưa đăng nhập'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={signIn}
+                  disabled={authLoading}
+                  className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  {session ? 'Đổi' : 'Đăng nhập'}
+                </button>
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                  placeholder="Email"
+                />
+                <input
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                  placeholder="Mật khẩu"
+                />
+              </div>
+            </div>
 
-              {/* Ticket Type Select */}
+            <form onSubmit={handleHoldOrder} className="space-y-5">
               <div>
-                <label className="block text-xs text-gray-400 mb-1.5 font-semibold">
-                  Chọn phân hạng vé:
-                </label>
+                <label className="block text-xs text-gray-400 mb-1.5 font-semibold">Chọn phân hạng vé</label>
                 <div className="grid grid-cols-1 gap-2">
-                  {concert.ticketTypes.map((tt) => (
+                  {concert.ticketTypes.map((ticketType) => (
                     <button
-                      key={tt.id}
+                      key={ticketType.id}
                       type="button"
                       onClick={() => {
-                        setSelectedTicketTypeId(tt.id);
-                        setBookingSuccess(null);
-                        setBookingError(null);
-                        setPaymentUrl(null);
+                        setSelectedTicketTypeId(ticketType.id);
+                        setQuantity(1);
+                        resetCheckout();
                       }}
+                      disabled={ticketType.remaining === 0}
                       className={`flex justify-between items-center px-4 py-3 rounded-xl border text-xs text-left transition-all ${
-                        tt.remaining === 0
+                        ticketType.remaining === 0
                           ? 'border-gray-950 bg-gray-950 text-gray-600 opacity-50 cursor-not-allowed'
-                          : selectedTicketTypeId === tt.id
+                          : selectedTicketTypeId === ticketType.id
                           ? 'border-indigo-500 bg-indigo-950/20 text-white font-bold'
                           : 'border-gray-800 bg-gray-950/40 text-gray-300 hover:border-gray-700'
                       }`}
-                      disabled={tt.remaining === 0}
                     >
                       <div>
-                        <span>{tt.name}</span>
+                        <span>{ticketType.name}</span>
                         <span className="text-[10px] text-gray-500 block">
-                          Giới hạn: {tt.maxLimitPerUser} vé/tài khoản
+                          Tối đa {ticketType.maxLimitPerUser} vé/tài khoản
                         </span>
                       </div>
                       <div className="text-right">
-                        <span className="font-bold block text-indigo-400">
-                          {Number(tt.price).toLocaleString('vi-VN')} đ
-                        </span>
+                        <span className="font-bold block text-indigo-400">{formatCurrency(ticketType.price)}</span>
                         <span className="text-[10px] text-gray-500">
-                          {tt.remaining > 0 ? `Còn: ${tt.remaining} vé` : 'Hết vé'}
+                          {ticketType.remaining > 0 ? `Còn ${ticketType.remaining} vé` : 'Hết vé'}
                         </span>
                       </div>
                     </button>
@@ -305,51 +504,15 @@ export default function ConcertDetailPage() {
                 </div>
               </div>
 
-              {/* Payment Gateway Selection */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5 font-semibold">
-                  Chọn cổng thanh toán trực tuyến:
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setGateway('vnpay')}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${
-                      gateway === 'vnpay'
-                        ? 'border-indigo-500 bg-indigo-950/20 text-white font-bold'
-                        : 'border-gray-800 bg-gray-950/40 text-gray-400 hover:border-gray-700'
-                    }`}
-                  >
-                    <span className="text-xs uppercase tracking-wider font-extrabold text-blue-400">VNPAY</span>
-                    <span className="text-[9px] text-gray-500 mt-0.5">Cổng ngân hàng</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGateway('momo')}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${
-                      gateway === 'momo'
-                        ? 'border-indigo-500 bg-indigo-950/20 text-white font-bold'
-                        : 'border-gray-800 bg-gray-950/40 text-gray-400 hover:border-gray-700'
-                    }`}
-                  >
-                    <span className="text-xs uppercase tracking-wider font-extrabold text-pink-400">MOMO</span>
-                    <span className="text-[9px] text-gray-500 mt-0.5">Ví điện tử</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Selected ticket details & Quantity input */}
-              {selectedTicketType && !bookingSuccess && (
+              {selectedTicketType && !holdResult && (
                 <div className="bg-gray-950/80 p-4 rounded-xl border border-gray-800/80 space-y-4">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400">Đơn giá:</span>
-                    <span className="font-bold text-white">
-                      {Number(selectedTicketType.price).toLocaleString('vi-VN')} đ
-                    </span>
+                    <span className="text-gray-400">Đơn giá</span>
+                    <span className="font-bold text-white">{formatCurrency(selectedTicketType.price)}</span>
                   </div>
 
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400">Số lượng mua:</span>
+                    <span className="text-gray-400">Số lượng</span>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -361,7 +524,7 @@ export default function ConcertDetailPage() {
                       <span className="w-10 text-center font-bold">{quantity}</span>
                       <button
                         type="button"
-                        onClick={() => setQuantity(Math.min(selectedTicketType.remaining, quantity + 1))}
+                        onClick={() => setQuantity(Math.min(maxSelectableQuantity, quantity + 1))}
                         className="w-8 h-8 flex items-center justify-center rounded bg-gray-800 text-white hover:bg-gray-700 font-bold"
                       >
                         +
@@ -370,153 +533,242 @@ export default function ConcertDetailPage() {
                   </div>
 
                   <div className="border-t border-gray-800/80 pt-3 flex justify-between items-center">
-                    <span className="text-xs text-gray-400 font-semibold">Tổng tạm tính:</span>
+                    <span className="text-xs text-gray-400 font-semibold">Tổng tạm tính</span>
                     <span className="text-lg font-bold text-indigo-400">
-                      {(Number(selectedTicketType.price) * quantity).toLocaleString('vi-VN')} đ
+                      {formatCurrency(selectedTicketType.price * quantity)}
                     </span>
                   </div>
                 </div>
               )}
 
-              {/* Action Error Box */}
-              {bookingError && (
-                <div className="bg-red-950/20 border border-red-900/50 p-4 rounded-xl text-red-200 text-xs flex gap-2">
-                  <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
-                  <div>
-                    <p className="font-bold">Lỗi đặt hàng / Thanh toán</p>
-                    <p className="mt-1 text-red-300/80">{bookingError}</p>
+              {waitingStatus && (
+                <div className="rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-4 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-indigo-200 font-bold">
+                      <Clock3 className="w-4 h-4 text-indigo-400" />
+                      {waitingStatus.status === 'WAITING'
+                        ? `Hàng chờ vị trí ${waitingStatus.position}`
+                        : `Đã tới lượt, token còn ${waitingStatus.expiresInSeconds}s`}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={refreshWaitingRoom}
+                      disabled={waitingLoading || !session}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold"
+                    >
+                      Kiểm tra
+                    </button>
                   </div>
                 </div>
               )}
 
-              {/* Booking success and payment options box */}
-              {bookingSuccess && (
-                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
-                  {['pending', 'PENDING'].includes(bookingSuccess.order.status) && (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-yellow-400 font-bold text-sm">
-                        <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
-                        Đơn hàng đang chờ thanh toán...
-                      </div>
-                      <p className="text-slate-400 text-[11px]">
-                        Một yêu cầu giữ chỗ đã được thiết lập. Vui lòng hoàn tất thanh toán trong <strong>10 phút</strong> để tránh bị tự động hủy và giải phóng ghế.
-                      </p>
-                      
-                      {paymentUrl && (
-                        <a
-                          href={paymentUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-center gap-1.5 w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-center shadow-md hover:shadow-lg transition-all"
-                        >
-                          Mở trang thanh toán mô phỏng
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={checkPaymentStatus}
-                        disabled={checkingPayment}
-                        className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all"
-                      >
-                        {checkingPayment ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
-                            Đang kiểm tra kết quả...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
-                            Kiểm tra kết quả thanh toán
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {['paid', 'PAID'].includes(bookingSuccess.order.status) && (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        Thanh toán thành công!
-                      </div>
-                      <p className="text-slate-400 text-[11px]">
-                        Giao dịch được đối soát thành công. Vé của bạn đã được chuyển sang trạng thái đã đặt chỗ.
-                      </p>
-                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Mã đơn hàng:</span>
-                          <span className="font-mono font-bold text-white">{bookingSuccess.order.id}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Số lượng vé:</span>
-                          <span className="font-bold text-white">{bookingSuccess.tickets.length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Mã ghế (SEATS):</span>
-                          <span className="font-bold text-emerald-400 font-mono">
-                            {bookingSuccess.tickets.map((t) => t.seatNumber).join(', ')}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {/* Interactive E-Ticket mockup */}
-                      <div className="border border-slate-800 bg-white p-4 rounded-xl flex flex-col items-center justify-center shadow-lg">
-                        <div className="w-24 h-24 bg-gray-200 border border-gray-300 flex items-center justify-center text-black text-[9px] text-center p-2 rounded">
-                          [E-TICKET QR CODE]<br/>
-                          ID: {bookingSuccess.order.id.slice(0, 8)}
-                        </div>
-                        <span className="text-[10px] text-gray-500 font-bold mt-2 tracking-wide uppercase">Mã soát vé điện tử</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {['failed', 'CANCELLED'].includes(bookingSuccess.order.status) && (
-                    <div className="space-y-2 text-red-400">
-                      <div className="flex items-center gap-2 font-bold text-sm">
-                        <AlertTriangle className="w-5 h-5 text-red-500" />
-                        Đơn hàng đã bị hủy
-                      </div>
-                      <p className="text-slate-400 text-[11px]">
-                        Giao dịch thanh toán thất bại hoặc quá hạn 10 phút. Vé giữ chỗ đã được giải phóng cho khán giả khác. Vui lòng thực hiện đặt vé lại.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBookingSuccess(null);
-                          setPaymentUrl(null);
-                        }}
-                        className="w-full bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl transition-all"
-                      >
-                        Đặt vé mới
-                      </button>
-                    </div>
-                  )}
+              {holdError && (
+                <div className="bg-red-950/20 border border-red-900/50 p-4 rounded-xl text-red-200 text-xs flex gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+                  <div>
+                    <p className="font-bold">Không thể tiếp tục</p>
+                    <p className="mt-1 text-red-300/80">{holdError}</p>
+                  </div>
                 </div>
               )}
 
-              {/* Purchase Button */}
-              {!bookingSuccess && (
+              {!holdResult && (
                 <button
                   type="submit"
-                  disabled={bookingLoading || !selectedTicketTypeId || (selectedTicketType ? selectedTicketType.remaining === 0 : true)}
+                  disabled={holdLoading || waitingLoading || !selectedTicketTypeId || !selectedTicketType || selectedTicketType.remaining === 0}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors text-white font-bold py-3 rounded-xl text-sm shadow-lg hover:shadow-indigo-500/20 flex items-center justify-center gap-1.5"
                 >
-                  {bookingLoading ? (
+                  {holdLoading || waitingLoading ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Đang xử lý đặt vé...
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Đang giữ vé...
                     </>
                   ) : (
-                    'Xác nhận đặt mua vé'
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      Giữ vé và tạo order
+                    </>
                   )}
                 </button>
               )}
             </form>
           </div>
-        </div>
 
+          {holdResult && (
+            <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
+              <div className="flex items-center gap-2 text-yellow-400 font-bold text-sm">
+                <Clock3 className="w-5 h-5" />
+                Order đang chờ thanh toán
+              </div>
+
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Order ID</span>
+                  <span className="font-mono font-bold text-white text-right">{holdResult.orderId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Trạng thái</span>
+                  <span className="font-bold text-yellow-300">{orderStatus}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Hết hạn giữ vé</span>
+                  <span className="font-bold text-white">{formatDateTime(holdResult.expiresAt)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-800 pt-2">
+                  <span className="text-slate-400 font-semibold">Tổng tiền</span>
+                  <span className="font-extrabold text-lg text-indigo-400">{formatCurrency(holdResult.totalAmount)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {holdResult.items.map((item) => (
+                  <div key={item.ticketTypeId} className="flex justify-between rounded-lg bg-slate-900/50 px-3 py-2">
+                    <span className="text-slate-300">{item.ticketTypeName}</span>
+                    <span className="font-bold text-white">
+                      {item.quantity} x {formatCurrency(item.unitPrice)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleStartPayment}
+                disabled={paymentLoading || ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all"
+              >
+                {paymentLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Đang tạo thanh toán...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4" />
+                    Thanh toán VNPAY
+                  </>
+                )}
+              </button>
+
+              {paymentUrl && (
+                <a
+                  href={paymentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-center shadow-md hover:shadow-lg transition-all"
+                >
+                  Mở lại trang thanh toán
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+
+              <button
+                type="button"
+                onClick={checkPaymentStatus}
+                disabled={checkingPayment}
+                className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all"
+              >
+                {checkingPayment ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                    Đang kiểm tra...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                    Kiểm tra kết quả thanh toán
+                  </>
+                )}
+              </button>
+
+              {['paid', 'PAID'].includes(orderSnapshot?.order.status || '') && (
+                <div className="space-y-3 border-t border-slate-800 pt-4">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5" />
+                    Đã cấp e-ticket
+                  </div>
+                  {paidTickets.map((ticket) => (
+                    <div key={ticket.id} className="bg-white text-slate-950 p-4 rounded-xl">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] uppercase text-slate-500 font-bold">Ticket code</p>
+                          <p className="font-mono text-xs font-bold">{ticket.id}</p>
+                        </div>
+                        <Ticket className="w-7 h-7 text-indigo-600" />
+                      </div>
+                      <div className="mt-3 bg-slate-100 border border-slate-200 rounded-lg p-3 text-center">
+                        <p className="font-mono text-[11px] break-all">{ticket.qrCode || ticket.id}</p>
+                      </div>
+                      <div className="mt-3 flex justify-between text-xs">
+                        <span className="text-slate-500">Trạng thái</span>
+                        <span className="font-bold text-emerald-600">{ticket.status}</span>
+                      </div>
+                      <div className="mt-1 flex justify-between text-xs">
+                        <span className="text-slate-500">Ghế</span>
+                        <span className="font-bold">{ticket.seatNumber || 'N/A'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {['failed', 'CANCELLED', 'expired'].includes(orderSnapshot?.order.status || '') && (
+                <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-red-200">
+                  Đơn hàng đã thất bại hoặc hết hạn. Vé giữ tạm đã được hoàn về tồn kho.
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={resetCheckout}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl transition-all"
+              >
+                Đặt vé mới
+              </button>
+            </div>
+          )}
+
+          <div className="bg-gray-900 p-5 rounded-2xl border border-gray-800 shadow-xl">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-indigo-400" />
+                Lịch sử đơn hàng
+              </h3>
+              <button
+                type="button"
+                onClick={() => loadHistory()}
+                disabled={!session || historyLoading}
+                className="h-8 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-xs font-bold text-white"
+              >
+                Tải
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {!session ? (
+                <p className="text-xs text-gray-500">Đăng nhập để xem lịch sử.</p>
+              ) : history.length === 0 ? (
+                <p className="text-xs text-gray-500">Chưa có dữ liệu lịch sử.</p>
+              ) : (
+                history.map((item) => (
+                  <div key={item.orderId} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3 text-xs">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-white">{item.concertName}</p>
+                        <p className="text-gray-500 mt-0.5">{formatDateTime(item.createdAt)}</p>
+                      </div>
+                      <span className="font-bold text-indigo-300">{item.status}</span>
+                    </div>
+                    <div className="mt-2 flex justify-between text-gray-400">
+                      <span>{item.tickets.length} vé</span>
+                      <span className="font-bold text-white">{formatCurrency(item.totalAmount)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

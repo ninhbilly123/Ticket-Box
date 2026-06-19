@@ -3,6 +3,7 @@ import { prisma } from '../../shared/lib/prisma';
 import redisClient from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
+import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
 
 // Helper function to generate VNPAY time format (yyyyMMddHHmmss) in GMT+7
 function getVNPTime(): string {
@@ -362,7 +363,14 @@ export class PaymentService {
       // 2. Get order record
       const order = await tx.order.findUnique({
         where: { id: payment.orderId },
-        include: { orderItems: { include: { tickets: true } } },
+        include: {
+          orderItems: {
+            include: {
+              ticketType: true,
+              tickets: true,
+            },
+          },
+        },
       });
 
       if (!order) {
@@ -392,33 +400,62 @@ export class PaymentService {
           },
         });
 
-        // Activate tickets and generate seat numbers
-        const tickets = await tx.ticket.findMany({
-          where: {
-            orderItem: {
-              orderId: order.id,
-            },
-          },
-        });
-
-        for (let i = 0; i < tickets.length; i++) {
-          const t = tickets[i];
-          const seatNum = t.seatNumber || `S-${Math.floor(10 + Math.random() * 89)}-${i + 1}`;
-          await tx.ticket.update({
-            where: { id: t.id },
-            data: {
-              status: 'valid',
-              seatNumber: seatNum,
-            },
-          });
-        }
-
-        // Update TicketInventory (reserved -> sold)
+        // Issue tickets after payment succeeds. Hold-order flow does not create QR before payment.
         for (const item of order.orderItems) {
+          const ticketZone = item.ticketType.name.replace(/\s+/g, '').toUpperCase();
+          const existingTickets = item.tickets;
+
+          for (let i = 0; i < existingTickets.length; i++) {
+            const ticket = existingTickets[i];
+            await tx.ticket.update({
+              where: { id: ticket.id },
+              data: {
+                status: 'valid',
+                seatNumber: ticket.seatNumber || `${ticketZone}-${String(i + 1).padStart(3, '0')}`,
+              },
+            });
+          }
+
+          const missingTicketCount = Math.max(0, item.quantity - existingTickets.length);
+          for (let i = 0; i < missingTicketCount; i++) {
+            await tx.ticket.create({
+              data: {
+                orderItemId: item.id,
+                userId: order.userId,
+                qrCode: `TICKET-${order.id.slice(0, 8)}-${crypto.randomUUID()}`,
+                status: 'valid',
+                seatNumber: `${ticketZone}-${String(existingTickets.length + i + 1).padStart(3, '0')}`,
+              },
+            });
+          }
+
+          const inventory = await tx.ticketInventory.findUnique({
+            where: { ticketTypeId: item.ticketTypeId },
+            select: { reservedQuantity: true },
+          });
+          const inventoryReservedToMove = Math.min(inventory?.reservedQuantity ?? 0, item.quantity);
+          const inventoryAvailableToConsume = item.quantity - inventoryReservedToMove;
+          const inventoryUpdate: any = {
+            reservedQuantity: { decrement: inventoryReservedToMove },
+            soldQuantity: { increment: item.quantity },
+          };
+          if (inventoryAvailableToConsume > 0) {
+            inventoryUpdate.availableQuantity = { decrement: inventoryAvailableToConsume };
+          }
           await tx.ticketInventory.update({
             where: { ticketTypeId: item.ticketTypeId },
+            data: inventoryUpdate,
+          });
+
+          const currentTicketType = await tx.ticketType.findUnique({
+            where: { id: item.ticketTypeId },
+            select: { reservedQuantity: true },
+          });
+          const ticketTypeReservedToMove = Math.min(currentTicketType?.reservedQuantity ?? 0, item.quantity);
+          await tx.ticketType.update({
+            where: { id: item.ticketTypeId },
             data: {
-              reservedQuantity: { decrement: item.quantity },
+              reservedQuantity: { decrement: ticketTypeReservedToMove },
               soldQuantity: { increment: item.quantity },
             },
           });
@@ -441,13 +478,29 @@ export class PaymentService {
           },
         });
 
-        // Update TicketInventory (release reserved)
         for (const item of order.orderItems) {
+          const inventory = await tx.ticketInventory.findUnique({
+            where: { ticketTypeId: item.ticketTypeId },
+            select: { reservedQuantity: true },
+          });
+          const inventoryReservedToRelease = Math.min(inventory?.reservedQuantity ?? 0, item.quantity);
           await tx.ticketInventory.update({
             where: { ticketTypeId: item.ticketTypeId },
             data: {
-              reservedQuantity: { decrement: item.quantity },
-              availableQuantity: { increment: item.quantity },
+              reservedQuantity: { decrement: inventoryReservedToRelease },
+              availableQuantity: { increment: inventoryReservedToRelease },
+            },
+          });
+
+          const currentTicketType = await tx.ticketType.findUnique({
+            where: { id: item.ticketTypeId },
+            select: { reservedQuantity: true },
+          });
+          const ticketTypeReservedToRelease = Math.min(currentTicketType?.reservedQuantity ?? 0, item.quantity);
+          await tx.ticketType.update({
+            where: { id: item.ticketTypeId },
+            data: {
+              reservedQuantity: { decrement: ticketTypeReservedToRelease },
             },
           });
         }
@@ -488,7 +541,9 @@ export class PaymentService {
     });
 
     // 5. Publish messages to RabbitMQ after transaction successfully commits
-    if (result.processed) {
+    if (result.processed && result.concertId) {
+      await invalidateTicketAvailabilityCache(result.concertId, `payment.${String(result.status).toLowerCase()}`);
+
       if (result.status === 'SUCCESS') {
         for (const ticket of (result.tickets || [])) {
           await publishToQueue('ticketbox_notifications', {

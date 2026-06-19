@@ -389,12 +389,14 @@ export class OrderHoldService {
   }) {
     const expiresAt = new Date(order.createdAt.getTime() + getOrderHoldTtlMs());
     const expiresInSeconds = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
+    const isAwaitingPayment = PENDING_STATUSES.includes(order.status);
 
     return {
       orderId: order.id,
-      orderStatus: order.status,
       totalAmount: order.totalAmount,
-      expiresInSeconds: order.status === 'pending' ? Math.min(getOrderHoldTtlSeconds(), expiresInSeconds) : 0,
+      orderStatus: isAwaitingPayment ? 'AWAITING_PAYMENT' : order.status.toUpperCase(),
+      expiresAt: expiresAt.toISOString(),
+      expiresInSeconds: isAwaitingPayment ? Math.min(getOrderHoldTtlSeconds(), expiresInSeconds) : 0,
       items: order.items,
     };
   }

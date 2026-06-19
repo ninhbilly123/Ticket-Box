@@ -32,6 +32,16 @@ export interface Concert {
   ticketTypes: TicketType[];
 }
 
+async function readApiJson(res: Response, fallbackMessage: string) {
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) {
+    const error = new Error(json.message || json.error?.message || fallbackMessage);
+    (error as Error & { errorCode?: string }).errorCode = json.errorCode || json.error?.code;
+    throw error;
+  }
+  return json;
+}
+
 export async function fetchConcerts(filters: {
   search?: string;
   artist?: string;
@@ -62,6 +72,102 @@ export async function fetchConcertById(id: string): Promise<Concert> {
   if (!json.success) {
     throw new Error(json.error?.message || 'Failed to fetch concert details');
   }
+  return json.data;
+}
+
+export interface AuthSession {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+  };
+}
+
+export async function login(params: { email: string; password: string }): Promise<AuthSession> {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const json = await readApiJson(res, 'Đăng nhập thất bại');
+  return json.data;
+}
+
+export type WaitingRoomStatus =
+  | { status: 'WAITING'; position: number }
+  | { status: 'READY'; checkoutToken: string; expiresInSeconds: number };
+
+export async function joinWaitingRoom(params: {
+  concertId: string;
+  accessToken: string;
+}): Promise<WaitingRoomStatus> {
+  const res = await fetch(`${API_BASE_URL}/concerts/${params.concertId}/waiting-room/join`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+    },
+  });
+  const json = await readApiJson(res, 'Không thể tham gia hàng chờ');
+  return json.data;
+}
+
+export async function fetchWaitingRoomStatus(params: {
+  concertId: string;
+  accessToken: string;
+}): Promise<WaitingRoomStatus> {
+  const res = await fetch(`${API_BASE_URL}/concerts/${params.concertId}/waiting-room/status`, {
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+    },
+    cache: 'no-store',
+  });
+  const json = await readApiJson(res, 'Không thể kiểm tra hàng chờ');
+  return json.data;
+}
+
+export interface HoldOrderResponse {
+  orderId: string;
+  totalAmount: number;
+  orderStatus: 'AWAITING_PAYMENT' | string;
+  expiresAt: string;
+  expiresInSeconds: number;
+  items: Array<{
+    ticketTypeId: string;
+    ticketTypeName: string;
+    quantity: number;
+    unitPrice: number;
+  }>;
+}
+
+export async function holdOrder(params: {
+  concertId: string;
+  ticketTypeId: string;
+  quantity: number;
+  accessToken: string;
+  checkoutToken?: string;
+  idempotencyKey?: string;
+}): Promise<HoldOrderResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${params.accessToken}`,
+    'Idempotency-Key': params.idempotencyKey || `hold-${params.concertId}-${Date.now()}`,
+  };
+  if (params.checkoutToken) {
+    headers['Checkout-Token'] = params.checkoutToken;
+  }
+
+  const res = await fetch(`${API_BASE_URL}/orders/hold`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      concertId: params.concertId,
+      items: [{ ticketTypeId: params.ticketTypeId, quantity: params.quantity }],
+    }),
+  });
+  const json = await readApiJson(res, 'Giữ vé thất bại');
   return json.data;
 }
 
@@ -114,6 +220,42 @@ export async function fetchOrderById(id: string): Promise<BookTicketsResponse> {
   if (!json.success) {
     throw new Error(json.error?.message || 'Failed to fetch order details');
   }
+  return json.data;
+}
+
+export interface TicketHistoryItem {
+  orderId: string;
+  concertName: string;
+  concertVenue: string;
+  concertStartAt: string;
+  totalAmount: number;
+  status: string;
+  createdAt: string;
+  payments: Array<{
+    id: string;
+    status: string;
+    paymentGateway: string;
+    amount: number;
+    transactionId?: string | null;
+  }>;
+  tickets: Array<{
+    id: string;
+    qrCode: string;
+    status: string;
+    seatNumber: string | null;
+    ticketType: string;
+    price: number;
+  }>;
+}
+
+export async function fetchTicketHistory(accessToken: string): Promise<TicketHistoryItem[]> {
+  const res = await fetch(`${API_BASE_URL}/tickets/history`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: 'no-store',
+  });
+  const json = await readApiJson(res, 'Không thể tải lịch sử đơn hàng');
   return json.data;
 }
 
