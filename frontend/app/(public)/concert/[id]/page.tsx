@@ -143,6 +143,20 @@ export default function ConcertDetailPage() {
     return () => window.clearInterval(timer);
   }, [concertId, session, waitingStatus?.status]);
 
+  // Tự động kiểm tra trạng thái thanh toán khi người dùng quay lại tab (sau khi thanh toán ở tab VNPAY mới)
+  useEffect(() => {
+    if (!holdResult || orderSnapshot?.order.status === 'paid' || orderSnapshot?.order.status === 'failed') return;
+
+    const handleFocus = () => {
+      checkPaymentStatus();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [holdResult?.orderId, orderSnapshot?.order.status]);
+
   async function getSessionForCheckout() {
     if (session) return session;
     router.push(`/login?redirect=${encodeURIComponent(`/concert/${concertId}`)}`);
@@ -554,9 +568,25 @@ export default function ConcertDetailPage() {
 
           {holdResult && (
             <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
-              <div className="flex items-center gap-2 text-yellow-400 font-bold text-sm">
-                <Clock3 className="w-5 h-5" />
-                Order đang chờ thanh toán
+              <div className={`flex items-center gap-2 font-bold text-sm ${
+                ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
+                  ? 'text-emerald-400'
+                  : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
+                  ? 'text-red-400'
+                  : 'text-yellow-400'
+              }`}>
+                {['paid', 'PAID'].includes(orderSnapshot?.order.status || '') ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '') ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <Clock3 className="w-5 h-5" />
+                )}
+                {['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
+                  ? 'Đơn hàng thanh toán thành công'
+                  : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
+                  ? 'Đơn hàng thanh toán thất bại'
+                  : 'Order đang chờ thanh toán'}
               </div>
 
               <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-2">
@@ -566,7 +596,15 @@ export default function ConcertDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Trạng thái</span>
-                  <span className="font-bold text-yellow-300">{orderStatus}</span>
+                  <span className={`font-bold uppercase ${
+                    ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
+                      ? 'text-emerald-400'
+                      : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
+                      ? 'text-red-400'
+                      : 'text-yellow-300'
+                  }`}>
+                    {orderStatus}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Hết hạn giữ vé</span>

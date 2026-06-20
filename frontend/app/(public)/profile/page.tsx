@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Calendar, History, Mail, RefreshCw, Shield, Ticket, UserCircle } from 'lucide-react';
-import { TicketHistoryItem, fetchTicketHistory } from '../../../lib/api';
+import { TicketHistoryItem, fetchTicketHistory, initiatePayment } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth-context';
 
 function formatCurrency(value: number) {
@@ -24,6 +24,7 @@ export default function ProfilePage() {
   const { session, status, refreshSession } = useAuth();
   const [history, setHistory] = useState<TicketHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadHistory() {
@@ -41,8 +42,35 @@ export default function ProfilePage() {
     }
   }
 
+  async function handlePayNow(orderId: string) {
+    setPayingOrderId(orderId);
+    setError(null);
+    try {
+      const payment = await initiatePayment({
+        orderId,
+        gateway: 'vnpay',
+        idempotencyKey: `pay-profile-${orderId}-${Date.now()}`,
+      });
+      window.open(payment.paymentUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setError((err as Error).message || 'Không thể tạo liên kết thanh toán.');
+    } finally {
+      setPayingOrderId(null);
+    }
+  }
+
   useEffect(() => {
     loadHistory();
+
+    // Tự động tải lại lịch sử đơn hàng khi người dùng quay lại tab (sau khi thanh toán ở tab mới)
+    const handleFocus = () => {
+      loadHistory();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [session?.accessToken]);
 
   if (status === 'loading') {
@@ -145,9 +173,24 @@ export default function ProfilePage() {
                         {formatDateTime(order.createdAt)}
                       </p>
                     </div>
-                    <div className="text-left sm:text-right">
+                    <div className="text-left sm:text-right flex flex-col items-start sm:items-end">
                       <p className="font-extrabold text-indigo-300">{formatCurrency(order.totalAmount)}</p>
-                      <p className="mt-1 text-xs font-bold uppercase text-gray-400">{order.status}</p>
+                      <p className={`mt-1 text-xs font-bold uppercase ${
+                        order.status.toLowerCase() === 'paid' ? 'text-emerald-400' :
+                        order.status.toLowerCase() === 'failed' ? 'text-red-400' : 'text-yellow-500'
+                      }`}>
+                        {order.status}
+                      </p>
+                      {order.status.toLowerCase() === 'pending' && (
+                        <button
+                          type="button"
+                          disabled={payingOrderId !== null}
+                          onClick={() => handlePayNow(order.orderId)}
+                          className="mt-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 text-xs font-bold text-white transition-all shadow-md shadow-indigo-900/20"
+                        >
+                          {payingOrderId === order.orderId ? 'Đang tạo link...' : 'Thanh toán ngay'}
+                        </button>
+                      )}
                     </div>
                   </div>
 
