@@ -21,3 +21,9 @@ Hệ thống SHALL gửi email chứa e-ticket QR đến địa chỉ email củ
 - **WHEN** email worker không gửi được e-ticket VIP cho khách mời
 - **THEN** hệ thống SHALL cập nhật trạng thái gửi email là `FAILED`
 - **AND** import report SHALL ghi nhận lỗi gửi email để ban tổ chức có thể xử lý hoặc retry
+
+#### Scenario: SMTP từ chối thông tin xác thực hoặc địa chỉ gửi
+- **WHEN** SMTP từ chối credential hoặc `MAIL FROM` không hợp lệ
+- **THEN** email job SHALL thất bại
+- **AND** trạng thái email của khách VIP SHALL là `FAILED`
+- **AND** hệ thống SHALL giữ nguyên QR token và bản ghi khách VIP để phục vụ kiểm tra hoặc gửi lại sau

@@ -7,7 +7,7 @@ TicketBox hiện đã có các capability nền tảng như concert listing, sea
 - **Background Workers**: xử lý job trích xuất PDF, gọi Gemini, đọc IMAP, import CSV và gửi email.
 - **Object Storage (MinIO/S3)**: lưu PDF nghệ sĩ, CSV gốc, CSV lỗi và file phục vụ audit.
 - **Primary Database (PostgreSQL)**: lưu source of truth cho concert, bio, sponsor email, khách VIP, import report và e-ticket.
-- **Message Queue (RabbitMQ/BullMQ)**: điều phối job nền.
+- **Message Queue (BullMQ on Redis)**: điều phối job nền.
 - **Google Gemini API**: sinh bio tiếng Việt từ text đã làm sạch.
 - **Máy chủ Email**: nguồn IMAP nhận CSV và kênh SMTP gửi e-ticket/cảnh báo.
 
@@ -247,3 +247,31 @@ Unique index đề xuất:
 - **Email khách mời không gửi được** -> Guest vẫn được lưu, email status là `FAILED`, report thể hiện số email gửi lỗi để có thể retry.
 - **MinIO local khác S3 production** -> Chỉ dùng API S3-compatible để khi cần có thể thay MinIO bằng S3.
 - **IMAP mailbox có nhiều file cũ** -> Lưu `mailboxMessageId` đã xử lý để không import lại cùng attachment.
+
+## Implementation Alignment
+
+### Queue và lịch chạy
+
+- Hệ thống dùng BullMQ trên Redis cho AI bio, import CSV và email jobs; RabbitMQ không được dùng trong implementation hiện tại.
+- `node-cron` kích hoạt tác vụ poll mailbox. Worker SHALL không mở poll mới khi lần poll trước chưa kết thúc.
+
+### Quy tắc đọc mailbox IMAP
+
+- Worker chỉ tìm email chưa đọc có attachment `.csv`; với Gmail, truy vấn giới hạn các email phù hợp trong 14 ngày gần nhất.
+- Worker SHALL fetch xong metadata trước khi download attachment để tránh chạy lệnh IMAP lồng trong fetch iterator trên cùng connection.
+- Attachment được download bằng sequence number; message chỉ được đánh dấu `Seen` sau khi download CSV thành công.
+- Nếu kết nối hoặc đọc IMAP thất bại, hệ thống SHALL tạo report `FAILED`. `NO_FILE` chỉ được tạo khi mailbox được đọc thành công nhưng không có CSV hợp lệ.
+- File đã xử lý được chống trùng theo `mailboxMessageId + originalFileName`.
+
+### Trạng thái import và gửi email
+
+- `SUCCESS`: tất cả dòng được import mới, không có dòng lỗi hoặc trùng.
+- `PARTIAL_SUCCESS`: có ít nhất một dòng trùng hoặc lỗi, bao gồm trường hợp toàn bộ dòng đều trùng.
+- `FAILED`: file sai cấu trúc/không parse được, toàn bộ dòng lỗi, sender không hợp lệ hoặc mailbox IMAP không đọc được.
+- `NO_FILE`: poll mailbox thành công nhưng không tìm thấy attachment CSV hợp lệ.
+- Import status được chốt sau bước import dữ liệu; gửi email diễn ra bất đồng bộ. Email thành công tăng `emailSentRows`; email thất bại cập nhật `VipGuest.emailStatus = FAILED` nhưng không rollback khách đã import và không đổi import status.
+
+### Cấu hình tích hợp ngoài
+
+- Gemini model được cấu hình qua `GEMINI_MODEL`; lỗi tạm thời 429/5xx được retry có giới hạn trước khi bio chuyển `FAILED`.
+- SMTP SHALL dùng credential đúng với `SMTP_HOST`, và `SMTP_FROM` SHALL parse thành mailbox RFC hợp lệ. Với Gmail SMTP, sender dùng địa chỉ Gmail đã xác thực.

@@ -79,3 +79,13 @@
 - [x] 10.1 Cập nhật README hướng dẫn cấu hình MinIO, Gemini API, IMAP và SMTP.
 - [x] 10.2 Bổ sung ví dụ CSV khách mời VIP với header `fullName,email,phone,company,eventCode,note`.
 - [x] 10.3 Bổ sung hướng dẫn demo luồng AI Artist Bio và VIP Guest Sync cho người chấm.
+
+> Ghi chú archive: các task 9.1-9.5 là automated tests được deferred vì backend chưa cấu hình test runner. Các luồng chính đã được kiểm thử tích hợp thủ công bằng API thật, Gemini, Gmail IMAP, MinIO, Redis và SMTP.
+
+## 11. Integration Hardening
+
+- [x] 11.1 Phân biệt lỗi IMAP (`FAILED`) với trường hợp poll thành công nhưng không có CSV (`NO_FILE`).
+- [x] 11.2 Chống cron mailbox chạy chồng và tránh deadlock IMAP bằng cách fetch metadata hoàn tất trước khi download attachment theo sequence number.
+- [x] 11.3 Kiểm thử import CSV thật qua Gmail IMAP, bao gồm file hợp lệ và dòng trùng dẫn tới `PARTIAL_SUCCESS`.
+- [x] 11.4 Cấu hình SMTP Gmail đúng host/credential và chuẩn hóa `SMTP_FROM` thành địa chỉ hợp lệ.
+- [x] 11.5 Chạy TypeScript build, Prisma validate và OpenSpec validate sau các bản sửa tích hợp.

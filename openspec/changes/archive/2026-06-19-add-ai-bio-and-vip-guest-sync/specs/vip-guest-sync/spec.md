@@ -107,3 +107,43 @@ Hệ thống SHALL lưu báo cáo kết quả cho mỗi lần import CSV để b
 - **WHEN** worker không thể parse file CSV hoặc file không có dòng hợp lệ nào
 - **THEN** import report SHALL có trạng thái `FAILED`
 - **AND** report SHALL lưu lỗi tổng quát và object key của file CSV gốc trong MinIO
+
+### Requirement: Phân biệt không có file và lỗi mailbox IMAP
+Hệ thống SHALL chỉ kết luận `NO_FILE` sau khi đã kết nối và đọc mailbox thành công. Lỗi kết nối, xác thực, timeout hoặc đọc mailbox SHALL được ghi nhận là lỗi tích hợp, không được giả lập thành trường hợp nhà tài trợ không gửi file.
+
+#### Scenario: Poll mailbox thành công nhưng không có CSV hợp lệ
+- **WHEN** cron worker kết nối và đọc mailbox thành công nhưng không tìm thấy email chưa đọc có attachment `.csv` hợp lệ
+- **THEN** hệ thống SHALL tạo import report trạng thái `NO_FILE`
+
+#### Scenario: Không đọc được mailbox IMAP
+- **WHEN** cron worker không thể kết nối, xác thực hoặc đọc mailbox do timeout/lỗi kết nối
+- **THEN** hệ thống SHALL tạo import report trạng thái `FAILED`
+- **AND** report SHALL lưu thông tin lỗi IMAP
+- **AND** hệ thống SHALL không tạo report `NO_FILE` cho lần poll đó
+
+#### Scenario: Tải attachment CSV thành công
+- **WHEN** worker tìm thấy email chưa đọc có attachment CSV
+- **THEN** worker SHALL fetch metadata hoàn tất trước khi download attachment
+- **AND** worker SHALL chỉ đánh dấu email là đã đọc sau khi attachment được download thành công
+
+### Requirement: Trạng thái import độc lập với kết quả gửi email bất đồng bộ
+Hệ thống SHALL xác định trạng thái import dựa trên kết quả validate, dedupe và tạo khách VIP. Kết quả SMTP được cập nhật bất đồng bộ vào trạng thái email của từng khách và `emailSentRows`.
+
+#### Scenario: Tất cả dòng được import mới
+- **WHEN** tất cả dòng CSV hợp lệ, không trùng và được tạo thành khách VIP
+- **THEN** import report SHALL có trạng thái `SUCCESS`
+- **AND** email jobs MAY vẫn đang ở trạng thái chờ xử lý
+
+#### Scenario: File chỉ chứa dòng trùng
+- **WHEN** tất cả dòng trong CSV đã tồn tại theo `concertId + email` hoặc `concertId + phone`
+- **THEN** import report SHALL có trạng thái `PARTIAL_SUCCESS`
+- **AND** `successRows` SHALL bằng `0`
+- **AND** `duplicateRows` SHALL bằng tổng số dòng dữ liệu
+- **AND** hệ thống SHALL không tạo e-ticket hoặc email job mới
+
+#### Scenario: Email e-ticket thất bại sau khi import thành công
+- **WHEN** SMTP không gửi được e-ticket cho một khách đã import
+- **THEN** `VipGuest.emailStatus` SHALL chuyển thành `FAILED`
+- **AND** lỗi SMTP SHALL được lưu cho khách đó
+- **AND** `emailSentRows` SHALL không tăng
+- **AND** trạng thái import SHALL không bị rollback

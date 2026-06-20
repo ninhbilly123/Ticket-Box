@@ -1,5 +1,8 @@
-## ADDED Requirements
+# ai-artist-bio Specification
 
+## Purpose
+TBD - created by archiving change add-ai-bio-and-vip-guest-sync. Update Purpose after archive.
+## Requirements
 ### Requirement: Upload PDF hồ sơ nghệ sĩ
 Hệ thống SHALL cho phép ban tổ chức upload file PDF hồ sơ nghệ sĩ hoặc press kit cho một concert cụ thể. File PDF SHALL được lưu vào object storage và hệ thống SHALL tạo bản ghi xử lý AI bio có trạng thái ban đầu để ban tổ chức theo dõi.
 
@@ -75,3 +78,9 @@ Hệ thống SHALL cung cấp trạng thái xử lý AI bio để ban tổ chứ
 - **WHEN** AI bio có trạng thái `FAILED`
 - **THEN** hệ thống SHALL trả về thông điệp lỗi đã lưu
 - **AND** hệ thống SHALL giữ lại file PDF nguồn để ban tổ chức có thể kiểm tra hoặc chạy lại quy trình
+
+#### Scenario: Gemini gặp lỗi tạm thời
+- **WHEN** Gemini trả lỗi tạm thời như rate limit hoặc service unavailable
+- **THEN** worker SHALL retry có giới hạn
+- **AND** nếu các lần retry đều thất bại thì AI bio SHALL chuyển sang `FAILED` và lưu lỗi cuối cùng
+
