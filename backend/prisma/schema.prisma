@@ -76,6 +76,7 @@ model Concert {
   cancelledAt     DateTime?     @map("cancelled_at")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+  eventCode       String        @unique @map("event_code")
 
   ticketTypes           TicketType[]
   orders                Order[]
@@ -84,6 +85,8 @@ model Concert {
   notifications         Notification[]
   staffAssignments      StaffAssignment[]
   whitelistEmailConfigs WhitelistEmailConfig[]
+  artistBios            ArtistBio[]
+  importJobs            GuestImportJob[]
 
   @@map("concerts")
 }
@@ -208,16 +211,139 @@ model CheckinLog {
 }
 
 model VipGuest {
-  id         String   @id @default(uuid()) @db.Uuid
-  concertId  String   @map("concert_id") @db.Uuid
-  concert    Concert  @relation(fields: [concertId], references: [id], onDelete: Cascade)
-  fullName   String   @map("full_name")
-  identifier String
-  zone       String
-  csvBatchId String?  @map("csv_batch_id")
-  importedAt DateTime @default(now()) @map("imported_at")
+  id             String          @id @default(uuid()) @db.Uuid
+  concertId      String          @map("concert_id") @db.Uuid
+  concert        Concert         @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  fullName       String          @map("full_name")
+  identifier     String?
+  zone           String          @default("VIP")
+  csvBatchId     String?         @map("csv_batch_id")
+  importedAt     DateTime        @default(now()) @map("imported_at")
+  email          String?
+  phone          String?
+  company        String?
+  note           String?
+  sourceImportId String?         @map("source_import_id") @db.Uuid
+  sourceImport   GuestImportJob? @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
+  qrToken        String?         @unique @map("qr_token")
+  ticketStatus   VipGuestStatus  @default(VALID) @map("ticket_status")
+  emailStatus    EmailStatus     @default(PENDING) @map("email_status")
+  emailError     String?         @map("email_error") @db.Text
+  checkedInAt    DateTime?       @map("checked_in_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
+  @@unique([concertId, email])
+  @@unique([concertId, phone])
+  @@index([concertId])
   @@map("vip_guests")
+}
+
+enum VipGuestStatus {
+  VALID
+  USED
+  CANCELLED
+}
+
+enum EmailStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model ArtistBio {
+  id                 String          @id @default(uuid()) @db.Uuid
+  concertId          String          @map("concert_id") @db.Uuid
+  concert            Concert         @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  sourcePdfObjectKey String          @map("source_pdf_object_key")
+  sourcePdfFileName  String?         @map("source_pdf_file_name")
+  status             ArtistBioStatus @default(UPLOADED)
+  rawText            String?         @map("raw_text") @db.Text
+  cleanedText        String?         @map("cleaned_text") @db.Text
+  generatedBio       String?         @map("generated_bio") @db.Text
+  reviewedBio        String?         @map("reviewed_bio") @db.Text
+  publishedBio       String?         @map("published_bio") @db.Text
+  errorMessage       String?         @map("error_message") @db.Text
+  createdBy          String?         @map("created_by")
+  reviewedBy         String?         @map("reviewed_by")
+  publishedAt        DateTime?       @map("published_at")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  @@index([concertId, status])
+  @@map("artist_bios")
+}
+
+enum ArtistBioStatus {
+  UPLOADED
+  PROCESSING
+  AI_GENERATED
+  APPROVED
+  PUBLISHED
+  FAILED
+}
+
+model SponsorEmail {
+  id                String   @id @default(uuid()) @db.Uuid
+  email             String   @unique
+  displayName       String?  @map("display_name")
+  isActive          Boolean  @default(true) @map("is_active")
+  allowedEventCodes String[] @default([]) @map("allowed_event_codes")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("sponsor_emails")
+}
+
+model GuestImportJob {
+  id               String                @id @default(uuid()) @db.Uuid
+  concertId        String?               @map("concert_id") @db.Uuid
+  concert          Concert?              @relation(fields: [concertId], references: [id], onDelete: SetNull)
+  status           GuestImportStatus     @default(PENDING)
+  senderEmail      String?               @map("sender_email")
+  mailboxMessageId String?               @map("mailbox_message_id")
+  originalFileName String?               @map("original_file_name")
+  objectKey        String?               @map("object_key")
+  totalRows        Int                   @default(0) @map("total_rows")
+  successRows      Int                   @default(0) @map("success_rows")
+  duplicateRows    Int                   @default(0) @map("duplicate_rows")
+  errorRows        Int                   @default(0) @map("error_rows")
+  emailSentRows    Int                   @default(0) @map("email_sent_rows")
+  errorMessage     String?               @map("error_message") @db.Text
+  startedAt        DateTime?             @map("started_at")
+  finishedAt       DateTime?             @map("finished_at")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+  rowErrors        GuestImportRowError[]
+  vipGuests        VipGuest[]
+
+  @@index([status, createdAt])
+  @@map("guest_import_jobs")
+}
+
+enum GuestImportStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  PARTIAL_SUCCESS
+  FAILED
+  NO_FILE
+}
+
+model GuestImportRowError {
+  id               String         @id @default(uuid()) @db.Uuid
+  guestImportJobId String         @map("guest_import_job_id") @db.Uuid
+  guestImportJob   GuestImportJob @relation(fields: [guestImportJobId], references: [id], onDelete: Cascade)
+  rowNumber        Int            @map("row_number")
+  rawData          Json?          @map("raw_data")
+  errorCode        String         @map("error_code")
+  message          String
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  @@index([guestImportJobId])
+  @@map("guest_import_row_errors")
 }
 
 model StaffAssignment {

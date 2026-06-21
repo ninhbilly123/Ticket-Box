@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminService } from './admin.service';
 
 const concertCreateSchema = z.object({
+  eventCode: z.string().trim().min(1).max(64),
   name: z.string().min(1),
   venue: z.string().min(1),
   startAt: z.string().datetime().or(z.string().min(1)),

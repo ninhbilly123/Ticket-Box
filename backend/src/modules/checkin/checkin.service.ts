@@ -1,6 +1,7 @@
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
+import { verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 export class CheckinService {
   /**
@@ -34,7 +35,12 @@ export class CheckinService {
     });
 
     if (!ticket) {
-      return { status: 'INVALID_TICKET' };
+      return this.scanImportedVipGuest({
+        qrToken: ticketId,
+        scannedAtLocal,
+        concertId,
+        deviceId,
+      });
     }
 
     // 2. Kiểm tra vé có thuộc đúng concert đang soát không
@@ -107,6 +113,69 @@ export class CheckinService {
         },
       };
     });
+  }
+
+  private async scanImportedVipGuest(params: {
+    qrToken: string;
+    scannedAtLocal: string;
+    concertId: string;
+    deviceId: string;
+  }) {
+    const { qrToken, scannedAtLocal, concertId, deviceId } = params;
+    const guest = await prisma.vipGuest.findUnique({
+      where: { qrToken },
+      include: { concert: true },
+    });
+
+    if (!guest || !guest.qrToken || !verifyVipGuestQrToken(guest.id, guest.qrToken)) {
+      return { status: 'INVALID_TICKET' };
+    }
+    if (guest.concertId !== concertId) {
+      return { status: 'WRONG_CONCERT' };
+    }
+
+    const scannedAt = new Date(scannedAtLocal);
+    if (Number.isNaN(scannedAt.getTime())) {
+      return { status: 'INVALID_SCAN_TIME' };
+    }
+    if (scannedAt.toDateString() !== guest.concert.startAt.toDateString()) {
+      return { status: 'WRONG_DATE' };
+    }
+    if (guest.ticketStatus === 'CANCELLED') {
+      return { status: 'CANCELLED' };
+    }
+    if (guest.ticketStatus === 'USED') {
+      return {
+        status: 'ALREADY_USED',
+        checkedInAt: guest.checkedInAt,
+        deviceId: null,
+      };
+    }
+
+    const updated = await prisma.vipGuest.updateMany({
+      where: { id: guest.id, ticketStatus: 'VALID' },
+      data: { ticketStatus: 'USED', checkedInAt: scannedAt },
+    });
+    if (updated.count === 0) {
+      const latest = await prisma.vipGuest.findUnique({ where: { id: guest.id } });
+      return {
+        status: latest?.ticketStatus === 'CANCELLED' ? 'CANCELLED' : 'ALREADY_USED',
+        checkedInAt: latest?.checkedInAt || null,
+        deviceId: null,
+      };
+    }
+
+    return {
+      status: 'VALID',
+      ticket: {
+        id: guest.id,
+        seatNumber: null,
+        ticketType: guest.zone,
+        usedAt: scannedAt,
+        deviceId,
+        guestType: 'VIP_GUEST',
+      },
+    };
   }
 
   /**
@@ -235,25 +304,53 @@ export class CheckinService {
     const vipGuests = await prisma.vipGuest.findMany({
       where: {
         concertId,
-        OR: [
-          { fullName: { contains: query, mode: 'insensitive' } },
-          { identifier: { contains: query, mode: 'insensitive' } },
-        ],
+        ...(query
+          ? {
+              OR: [
+                { fullName: { contains: query, mode: 'insensitive' as const } },
+                { identifier: { contains: query, mode: 'insensitive' as const } },
+                { email: { contains: query, mode: 'insensitive' as const } },
+                { phone: { contains: query, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
       },
     });
 
     const result = [];
 
     for (const guest of vipGuests) {
+      if (guest.qrToken) {
+        result.push({
+          id: guest.id,
+          fullName: guest.fullName,
+          identifier: guest.identifier,
+          email: guest.email,
+          phone: guest.phone,
+          company: guest.company,
+          zone: guest.zone,
+          ticketDetails: {
+            ticketId: guest.qrToken,
+            ticketType: guest.zone,
+            status: guest.ticketStatus,
+            checkedIn: guest.ticketStatus === 'USED',
+            checkedInAt: guest.checkedInAt,
+          },
+        });
+        continue;
+      }
+
       // 2. Tìm User có email hoặc phone khớp với identifier
-      const user = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email: guest.identifier },
-            { phone: guest.identifier },
-          ],
-        },
-      });
+      const contacts = [guest.email, guest.phone, guest.identifier].filter(
+        (value): value is string => Boolean(value)
+      );
+      const user = contacts.length
+        ? await prisma.user.findFirst({
+            where: {
+              OR: contacts.flatMap((contact) => [{ email: contact }, { phone: contact }]),
+            },
+          })
+        : null;
 
       let ticket = null;
       let checkinLog = null;
@@ -320,10 +417,24 @@ export class CheckinService {
       throw new AppError(404, 'NOT_FOUND', 'Không tìm thấy thông tin khách VIP.');
     }
 
+    if (guest.qrToken) {
+      return this.scanImportedVipGuest({
+        qrToken: guest.qrToken,
+        deviceId,
+        scannedAtLocal: new Date().toISOString(),
+        concertId: guest.concertId,
+      });
+    }
+
+    const identifier = guest.email || guest.phone || guest.identifier;
+    if (!identifier) {
+      throw new AppError(400, 'VIP_GUEST_CONTACT_REQUIRED', 'Khach VIP chua co email hoac so dien thoai.');
+    }
+
     // Tìm user và vé tương ứng
     let user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: guest.identifier }, { phone: guest.identifier }],
+        OR: [{ email: identifier }, { phone: identifier }],
       },
     });
 
@@ -331,10 +442,10 @@ export class CheckinService {
     if (!user) {
       user = await prisma.user.create({
         data: {
-          email: guest.identifier.includes('@') ? guest.identifier : `${guest.id}@vip.ticketbox.com`,
+          email: identifier.includes('@') ? identifier : `${guest.id}@vip.ticketbox.com`,
           passwordHash: 'AUTO_GENERATED',
           fullName: guest.fullName,
-          phone: !guest.identifier.includes('@') ? guest.identifier : null,
+          phone: !identifier.includes('@') ? identifier : null,
           role: 'AUDIENCE',
         },
       });

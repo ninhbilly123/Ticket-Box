@@ -321,3 +321,38 @@ cd backend
 npm run build
 npm run test:member-a
 ```
+
+---
+
+## AI Artist Bio và đồng bộ khách mời VIP
+
+Các biến cấu hình được mô tả trong `backend/.env.example`. Chạy hạ tầng cục bộ bằng:
+
+```bash
+docker compose up -d postgres redis rabbitmq minio
+```
+
+MinIO API dùng cổng `9000`, giao diện quản trị dùng `http://localhost:9001`.
+
+CSV khách mời phải có đúng các header sau:
+
+```csv
+fullName,email,phone,company,eventCode,note
+Nguyen Van A,a@example.com,0900000001,Sponsor A,SKYTOUR-2026-HN,Khach moi VIP
+```
+
+Luồng AI Artist Bio dành cho tài khoản `ORGANIZER`:
+
+1. Upload PDF bằng `POST /api/v1/ai/artist-bio/concerts/:concertId/upload`, multipart field `file`.
+2. Worker trích xuất PDF, gọi Gemini và chuyển trạng thái thành `AI_GENERATED`.
+3. Xem bản sinh qua `GET /api/v1/ai/artist-bio/concerts/:concertId`.
+4. Duyệt/chỉnh sửa bằng `PATCH /api/v1/ai/artist-bio/:id/review`.
+5. Publish bằng `POST /api/v1/ai/artist-bio/:id/publish`; API chi tiết concert chỉ trả bio đã publish.
+
+Luồng VIP Guest Sync:
+
+1. Ban tổ chức quản lý email nhãn hàng qua `/api/v1/vip-guest-sync/sponsors`.
+2. Cron đọc attachment CSV từ mailbox IMAP, lưu bản gốc vào MinIO và tạo import job.
+3. Worker kiểm tra `eventCode`, email/phone và trùng lặp, sau đó sinh QR và gửi e-ticket.
+4. Ban tổ chức xem kết quả tại `/api/v1/vip-guest-sync/import-reports`.
+5. Nhân viên quét QR VIP bằng `POST /api/v1/checkins/scan` như vé thường.

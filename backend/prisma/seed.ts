@@ -17,6 +17,7 @@ const ticketCatalog = [
 
 async function resetDatabase() {
   await prisma.auditLog.deleteMany();
+  await prisma.guestImportRowError.deleteMany();
   await prisma.whitelistEmailConfig.deleteMany();
   await prisma.staffAssignment.deleteMany();
   await prisma.refreshToken.deleteMany();
@@ -24,6 +25,9 @@ async function resetDatabase() {
   await prisma.checkinLog.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.vipGuest.deleteMany();
+  await prisma.guestImportJob.deleteMany();
+  await prisma.sponsorEmail.deleteMany();
+  await prisma.artistBio.deleteMany();
   await prisma.ticket.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
@@ -267,6 +271,7 @@ async function main() {
   const now = new Date();
   const concertSeeds = [
     {
+      eventCode: 'SKYTOUR-2026-HN',
       name: 'Sky Tour 2026',
       venue: 'San van dong My Dinh, Ha Noi',
       startAt: new Date(now.getTime() + 2 * 60 * 60 * 1000),
@@ -276,6 +281,7 @@ async function main() {
       map: '/assets/seatmaps/skytour-seatmap.svg',
     },
     {
+      eventCode: 'DENV-2026-HCM',
       name: 'Show cua Den 2026',
       venue: 'Nha thi dau Phu Tho, TP HCM',
       startAt: new Date(now.getTime() + 12 * 24 * 60 * 60 * 1000),
@@ -285,6 +291,7 @@ async function main() {
       map: '/assets/seatmaps/denvau-seatmap.svg',
     },
     {
+      eventCode: 'MYTAM-2026-HCM',
       name: 'My Tam - Tri Am Live 2026',
       venue: 'San van dong Quan khu 7, TP HCM',
       startAt: new Date(now.getTime() + 25 * 24 * 60 * 60 * 1000),
@@ -294,6 +301,7 @@ async function main() {
       map: '/assets/seatmaps/mytam-seatmap.svg',
     },
     {
+      eventCode: 'MTP-2026-HN',
       name: 'MTP Special Night',
       venue: 'Trung tam Hoi nghi Quoc gia, Ha Noi',
       startAt: new Date(now.getTime() + 18 * 24 * 60 * 60 * 1000),
@@ -312,6 +320,7 @@ async function main() {
       data: {
         organizerId: item.organizerId,
         organizationId: item.organizationId,
+        eventCode: item.eventCode,
         name: item.name,
         venue: item.venue,
         startAt: item.startAt,
@@ -464,6 +473,14 @@ async function main() {
       allowedSenderEmail: 'sponsor@example.com',
       subjectKeyword: 'VIP CSV',
       status: 'ACTIVE',
+    },
+  });
+
+  await prisma.sponsorEmail.create({
+    data: {
+      email: 'sponsor@example.com',
+      displayName: 'Demo Sponsor',
+      allowedEventCodes: concertSeeds.map((concert) => concert.eventCode),
     },
   });
 

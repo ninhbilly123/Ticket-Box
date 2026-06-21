@@ -151,6 +151,7 @@ async function main() {
     });
     const foreignConcert = await prisma.concert.create({
       data: {
+        eventCode: `SMOKE-${Date.now()}`,
         organizerId: organizerB.id,
         organizationId: orgB.id,
         name: 'Foreign Concert',

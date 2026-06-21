@@ -13,6 +13,8 @@ import { ticketRoutes } from './modules/ticket/ticket.routes';
 import { orderRoutes } from './modules/order/order.routes';
 import { paymentRoutes } from './modules/payment/payment.routes';
 import { checkinRoutes } from './modules/checkin/checkin.routes';
+import { artistBioRoutes } from './modules/ai/artist-bio.routes';
+import { vipGuestSyncRoutes } from './modules/vip-guest-sync/vip-guest-sync.routes';
 import { errorHandler } from './shared/middleware/errorHandler';
 import { memberAOpenApi } from './shared/openapi/memberA';
 import { startCleanupWorker } from './workers/cleanup.worker';
@@ -20,6 +22,9 @@ import { startNotificationWorker } from './workers/notification.worker';
 import { startConcertListingCacheInvalidationWorker } from './workers/concert-listing-cache-invalidation.worker';
 import { startOrderExpirationWorker } from './workers/order-expiration.worker';
 import { startWaitingRoomWorker } from './workers/waiting-room.worker';
+import { startAiBioWorker } from './workers/ai-bio.worker';
+import { startVipGuestSyncWorker } from './workers/vip-guest-sync.worker';
+import { startEmailWorker } from './workers/email.worker';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,6 +49,8 @@ app.use('/api/v1/tickets', ticketRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/checkins', checkinRoutes);
+app.use('/api/v1/ai/artist-bio', artistBioRoutes);
+app.use('/api/v1/vip-guest-sync', vipGuestSyncRoutes);
 
 app.get('/api/v1/openapi/member-a.json', (req, res) => {
   res.status(200).json(memberAOpenApi);
@@ -60,6 +67,9 @@ export function startServer() {
     startConcertListingCacheInvalidationWorker();
     startOrderExpirationWorker();
     startWaitingRoomWorker();
+    startAiBioWorker();
+    startEmailWorker();
+    startVipGuestSyncWorker();
   });
 }
 

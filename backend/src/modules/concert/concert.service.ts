@@ -228,6 +228,11 @@ export class ConcertService {
             artist: true,
           },
         },
+        artistBios: {
+          where: { status: 'PUBLISHED' },
+          orderBy: { publishedAt: 'desc' },
+          take: 1,
+        },
       },
     });
 
@@ -243,6 +248,7 @@ export class ConcertService {
       name: concert.name,
       description: concert.description,
       artist: artistNames || 'Nhiều nghệ sĩ',
+      artistBio: concert.artistBios[0]?.publishedBio || null,
       dateTime: concert.startAt.toISOString(),
       startAt: concert.startAt.toISOString(),
       saleOpenAt: concert.saleOpenAt.toISOString(),

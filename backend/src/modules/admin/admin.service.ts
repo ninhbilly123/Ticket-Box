@@ -35,6 +35,7 @@ export class AdminService {
   }
 
   public async createConcert(user: AuthUser, input: {
+    eventCode: string;
     name: string;
     venue: string;
     startAt: string;
@@ -49,6 +50,7 @@ export class AdminService {
       data: {
         organizerId: user.id,
         organizationId,
+        eventCode: input.eventCode.trim().toUpperCase(),
         name: input.name,
         venue: input.venue,
         startAt: new Date(input.startAt),
@@ -71,6 +73,9 @@ export class AdminService {
       if (typeof input[field] === 'string') {
         data[field] = input[field];
       }
+    }
+    if (typeof input.eventCode === 'string' && input.eventCode.trim()) {
+      data.eventCode = input.eventCode.trim().toUpperCase();
     }
     if (typeof input.startAt === 'string') data.startAt = new Date(input.startAt);
     if (typeof input.saleOpenAt === 'string') data.saleOpenAt = new Date(input.saleOpenAt);
