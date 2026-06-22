@@ -24,13 +24,6 @@ export default function CustomerHeader() {
           >
             Concerts
           </Link>
-          <Link
-            href="/checkin"
-            className="hidden sm:inline-flex h-9 items-center rounded-lg px-3 font-semibold text-gray-300 hover:bg-gray-900 hover:text-white"
-          >
-            Check-in
-          </Link>
-
           {status === 'loading' ? (
             <span className="h-9 px-3 rounded-lg bg-gray-900 text-gray-500 flex items-center">Đang kiểm tra...</span>
           ) : session ? (

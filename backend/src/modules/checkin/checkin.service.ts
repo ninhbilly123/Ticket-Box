@@ -4,6 +4,49 @@ import { publishToQueue } from '../../shared/lib/rabbitmq';
 import { verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 export class CheckinService {
+  public async listAssignedConcerts(staffId: string) {
+    const assignments = await prisma.staffAssignment.findMany({
+      where: { staffId },
+      select: {
+        gateId: true,
+        concert: {
+          select: {
+            id: true,
+            eventCode: true,
+            name: true,
+            venue: true,
+            startAt: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    const concerts = new Map<string, {
+      id: string;
+      eventCode: string;
+      name: string;
+      venue: string;
+      startAt: Date;
+      status: string;
+      gateIds: string[];
+    }>();
+
+    for (const assignment of assignments) {
+      const existing = concerts.get(assignment.concert.id);
+      if (existing) {
+        if (!existing.gateIds.includes(assignment.gateId)) existing.gateIds.push(assignment.gateId);
+      } else {
+        concerts.set(assignment.concert.id, {
+          ...assignment.concert,
+          gateIds: [assignment.gateId],
+        });
+      }
+    }
+
+    return [...concerts.values()].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+  }
+
   /**
    * Soát vé trực tuyến (Online scan)
    */
@@ -182,11 +225,12 @@ export class CheckinService {
    * Đồng bộ dữ liệu offline từ client lên
    */
   public async syncOfflineLogs(params: {
+    concertId: string;
     deviceId: string;
     logs: Array<{ ticketId: string; scannedAtLocal: string }>;
     gateStaffId: string;
   }) {
-    const { deviceId, logs, gateStaffId } = params;
+    const { concertId, deviceId, logs, gateStaffId } = params;
 
     // Sắp xếp các lượt quét theo thời gian tăng dần (First-Scan Wins)
     const sortedLogs = [...logs].sort(
@@ -221,6 +265,16 @@ export class CheckinService {
             ticketId: log.ticketId,
             scannedAtLocal: log.scannedAtLocal,
             reason: 'Vé không tồn tại trong hệ thống (INVALID_TICKET)',
+          });
+          conflictCount++;
+          continue;
+        }
+
+        if (ticket.orderItem.ticketType.concertId !== concertId) {
+          conflicts.push({
+            ticketId: log.ticketId,
+            scannedAtLocal: log.scannedAtLocal,
+            reason: 'WRONG_CONCERT',
           });
           conflictCount++;
           continue;

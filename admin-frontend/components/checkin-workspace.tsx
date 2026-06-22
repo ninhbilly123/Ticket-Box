@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { 
   Camera, 
   Wifi, 
@@ -14,27 +14,36 @@ import {
   BarChart3, 
   QrCode, 
   RefreshCw, 
-  Laptop
+  Laptop,
+  LogOut
 } from 'lucide-react';
-import { 
-  Concert, 
-  fetchConcerts, 
-  scanTicket, 
-  syncOfflineLogs, 
-  fetchVipGuests, 
-  checkinVipGuest, 
-  fetchCheckinStats, 
-  ScanResult, 
-  VipGuestDetail, 
-  CheckinStats 
-} from '../../../lib/api';
+import {
+  AuthSession,
+  CheckinConcert,
+  CheckinStats,
+  ScanResult,
+  VipGuestDetail,
+  adminApi,
+} from '../lib/api';
 import { Html5Qrcode } from 'html5-qrcode';
 
-export default function CheckinPortalPage() {
+interface CheckinWorkspaceProps {
+  session: AuthSession;
+  onLogout: () => void;
+}
+
+interface OfflineCheckinLog {
+  ticketId: string;
+  scannedAtLocal: string;
+  concertId: string;
+}
+
+export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspaceProps) {
   // Môi trường
-  const [concerts, setConcerts] = useState<Concert[]>([]);
+  const [concerts, setConcerts] = useState<CheckinConcert[]>([]);
   const [selectedConcertId, setSelectedConcertId] = useState<string>('');
-  const [deviceId, setDeviceId] = useState<string>('Gate-1-Scanner');
+  const [selectedGateId, setSelectedGateId] = useState<string>('');
+  const [deviceId, setDeviceId] = useState<string>('');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   
   // Trạng thái tab: 'scan' | 'vip' | 'stats'
@@ -47,7 +56,7 @@ export default function CheckinPortalPage() {
   const [scanErrorMsg, setScanErrorMsg] = useState<string | null>(null);
   
   // Offline
-  const [offlineLogs, setOfflineLogs] = useState<Array<{ ticketId: string; scannedAtLocal: string }>>([]);
+  const [offlineLogs, setOfflineLogs] = useState<OfflineCheckinLog[]>([]);
   const [syncingOffline, setSyncingOffline] = useState<boolean>(false);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   
@@ -61,7 +70,15 @@ export default function CheckinPortalPage() {
   const [loadingStats, setLoadingStats] = useState<boolean>(false);
 
   const qrCodeInstance = useRef<Html5Qrcode | null>(null);
-  const scanTimeout = useRef<NodeJS.Timeout | null>(null);
+  const offlineStorageKey = `ticketbox_checkin_offline_${session.user.id}`;
+  const selectedConcert = useMemo(
+    () => concerts.find((concert) => concert.id === selectedConcertId) || null,
+    [concerts, selectedConcertId]
+  );
+  const currentOfflineLogs = useMemo(
+    () => offlineLogs.filter((log) => log.concertId === selectedConcertId),
+    [offlineLogs, selectedConcertId]
+  );
 
   // Phát âm thanh báo hiệu qua Web Audio API (không cần tệp .mp3)
   const playSound = (type: 'success' | 'warning' | 'error') => {
@@ -120,20 +137,27 @@ export default function CheckinPortalPage() {
     // Load danh sách concert
     const loadInitData = async () => {
       try {
-        const data = await fetchConcerts();
+        const data = await adminApi.listCheckinConcerts(session.accessToken);
         setConcerts(data);
         if (data.length > 0) {
           setSelectedConcertId(data[0].id);
+        } else {
+          setScanErrorMsg('Bạn chưa được phân công soát vé cho concert nào.');
         }
       } catch (err) {
         console.error('Failed to load concerts:', err);
+        setScanErrorMsg((err as Error).message || 'Không thể tải concert được phân công.');
       }
     };
 
     // Load offline logs từ LocalStorage
-    const stored = localStorage.getItem('offline_checkin_logs');
+    const stored = localStorage.getItem(offlineStorageKey);
     if (stored) {
-      setOfflineLogs(JSON.parse(stored));
+      try {
+        setOfflineLogs(JSON.parse(stored) as OfflineCheckinLog[]);
+      } catch {
+        localStorage.removeItem(offlineStorageKey);
+      }
     }
 
     loadInitData();
@@ -141,16 +165,22 @@ export default function CheckinPortalPage() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      stopScanner();
+      void stopScanner();
     };
-  }, []);
+  }, [session.accessToken, offlineStorageKey]);
+
+  useEffect(() => {
+    const firstGate = selectedConcert?.gateIds[0] || '';
+    setSelectedGateId(firstGate);
+    setDeviceId(firstGate ? `${firstGate}-${session.user.id.slice(0, 8)}` : '');
+  }, [selectedConcert?.id, session.user.id]);
 
   // 2. Tự động đồng bộ khi online trở lại
   useEffect(() => {
-    if (isOnline && offlineLogs.length > 0 && selectedConcertId) {
-      triggerOfflineSync();
+    if (isOnline && currentOfflineLogs.length > 0 && selectedConcertId) {
+      void triggerOfflineSync();
     }
-  }, [isOnline, selectedConcertId]);
+  }, [isOnline, selectedConcertId, currentOfflineLogs.length]);
 
   // Load VIP / Stats khi chuyển Tab hoặc đổi Concert
   useEffect(() => {
@@ -164,21 +194,21 @@ export default function CheckinPortalPage() {
   }, [activeTab, selectedConcertId]);
 
   // Lưu offline logs vào LocalStorage
-  const saveOfflineLogs = (newLogs: Array<{ ticketId: string; scannedAtLocal: string }>) => {
+  const saveOfflineLogs = (newLogs: OfflineCheckinLog[]) => {
     setOfflineLogs(newLogs);
-    localStorage.setItem('offline_checkin_logs', JSON.stringify(newLogs));
+    localStorage.setItem(offlineStorageKey, JSON.stringify(newLogs));
   };
 
   // Hàm đồng bộ offline logs lên server
   const triggerOfflineSync = async () => {
-    if (!isOnline || offlineLogs.length === 0) return;
+    if (!isOnline || currentOfflineLogs.length === 0 || !selectedConcertId) return;
     setSyncingOffline(true);
     setSyncSummary(null);
     try {
-      console.log('[Sync] Syncing offline logs...', offlineLogs);
-      const result = await syncOfflineLogs({
+      const result = await adminApi.syncOfflineLogs(session.accessToken, {
+        concertId: selectedConcertId,
         deviceId,
-        logs: offlineLogs,
+        logs: currentOfflineLogs.map(({ ticketId, scannedAtLocal }) => ({ ticketId, scannedAtLocal })),
       });
       
       let summary = `Đã đồng bộ thành công ${result.syncedCount} vé.`;
@@ -189,7 +219,7 @@ export default function CheckinPortalPage() {
         playSound('success');
       }
       setSyncSummary(summary);
-      saveOfflineLogs([]); // Xóa sạch log offline
+      saveOfflineLogs(offlineLogs.filter((log) => log.concertId !== selectedConcertId));
       
       // Load lại stats nếu đang ở tab stats
       if (activeTab === 'stats') {
@@ -267,7 +297,7 @@ export default function CheckinPortalPage() {
     // 1. XỬ LÝ OFFLINE
     if (!isOnline) {
       // Kiểm tra trùng lặp offline cục bộ trước
-      const isAlreadyScannedOffline = offlineLogs.some((l) => l.ticketId === trimmedId);
+      const isAlreadyScannedOffline = currentOfflineLogs.some((log) => log.ticketId === trimmedId);
       
       if (isAlreadyScannedOffline) {
         playSound('warning');
@@ -277,7 +307,7 @@ export default function CheckinPortalPage() {
         });
       } else {
         // Lưu tạm vào LocalStorage
-        const updated = [...offlineLogs, { ticketId: trimmedId, scannedAtLocal: scannedTime }];
+        const updated = [...offlineLogs, { ticketId: trimmedId, scannedAtLocal: scannedTime, concertId: selectedConcertId }];
         saveOfflineLogs(updated);
         
         playSound('success');
@@ -296,7 +326,7 @@ export default function CheckinPortalPage() {
 
     // 2. XỬ LÝ ONLINE (Gửi API trực tiếp)
     try {
-      const result = await scanTicket({
+      const result = await adminApi.scanTicket(session.accessToken, {
         ticketId: trimmedId,
         deviceId,
         scannedAtLocal: scannedTime,
@@ -321,7 +351,7 @@ export default function CheckinPortalPage() {
   // Xử lý nhập mã tay
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (manualTicketId) {
+    if (manualTicketId && selectedConcertId) {
       handleTicketScanned(manualTicketId);
       setManualTicketId('');
     }
@@ -332,7 +362,7 @@ export default function CheckinPortalPage() {
     if (!selectedConcertId) return;
     setLoadingVip(true);
     try {
-      const list = await fetchVipGuests(selectedConcertId, vipQuery);
+      const list = await adminApi.fetchVipGuests(session.accessToken, selectedConcertId, vipQuery);
       setVipGuests(list);
     } catch (err) {
       console.error(err);
@@ -344,10 +374,7 @@ export default function CheckinPortalPage() {
   // Check-in VIP
   const handleCheckinVip = async (vipGuestId: string) => {
     try {
-      const result = await checkinVipGuest({
-        vipGuestId,
-        deviceId,
-      });
+      const result = await adminApi.checkinVipGuest(session.accessToken, vipGuestId, deviceId);
       
       if (result.status === 'VALID') {
         playSound('success');
@@ -368,7 +395,7 @@ export default function CheckinPortalPage() {
     if (!selectedConcertId) return;
     setLoadingStats(true);
     try {
-      const data = await fetchCheckinStats(selectedConcertId);
+      const data = await adminApi.fetchCheckinStats(session.accessToken, selectedConcertId);
       setStats(data);
     } catch (err) {
       console.error(err);
@@ -420,16 +447,28 @@ export default function CheckinPortalPage() {
           </div>
 
           {/* Offline Cache Status */}
-          {offlineLogs.length > 0 && (
+          {currentOfflineLogs.length > 0 && (
             <button
               onClick={triggerOfflineSync}
               disabled={syncingOffline || !isOnline}
               className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 transition-colors text-slate-950 px-3 py-1.5 rounded-full text-xs font-extrabold shadow-md shadow-amber-500/10 disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncingOffline ? 'animate-spin' : ''}`} />
-              ĐỒNG BỘ ({offlineLogs.length})
+              ĐỒNG BỘ ({currentOfflineLogs.length})
             </button>
           )}
+          <div className="text-right text-xs">
+            <p className="font-bold text-slate-200">{session.user.fullName}</p>
+            <p className="text-slate-500">{selectedGateId || 'Chưa có cổng'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-300 transition hover:border-rose-500 hover:text-rose-300"
+            title="Đăng xuất"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
@@ -441,24 +480,42 @@ export default function CheckinPortalPage() {
           
           {/* Cấu hình Concert chính */}
           <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-xl">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
-              Lựa Chọn Đêm Diễn (Concert)
-            </label>
-            <select
-              value={selectedConcertId}
-              onChange={(e) => setSelectedConcertId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              {concerts.length === 0 ? (
-                <option value="">Đang tải danh sách concert...</option>
-              ) : (
-                concerts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title || c.name} — {new Date(c.startAt || c.dateTime).toLocaleDateString('vi-VN')} ({c.venue || c.location})
-                  </option>
-                ))
-              )}
-            </select>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest">
+                Đêm diễn được phân công
+                <select
+                  value={selectedConcertId}
+                  onChange={(event) => setSelectedConcertId(event.target.value)}
+                  className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {concerts.length === 0 ? (
+                    <option value="">Chưa có concert được phân công</option>
+                  ) : (
+                    concerts.map((concert) => (
+                      <option key={concert.id} value={concert.id}>
+                        {concert.eventCode} · {concert.name} · {new Date(concert.startAt).toLocaleDateString('vi-VN')}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest">
+                Cổng phụ trách
+                <select
+                  value={selectedGateId}
+                  onChange={(event) => {
+                    setSelectedGateId(event.target.value);
+                    setDeviceId(`${event.target.value}-${session.user.id.slice(0, 8)}`);
+                  }}
+                  disabled={!selectedConcert?.gateIds.length}
+                  className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  {(selectedConcert?.gateIds || []).map((gateId) => (
+                    <option key={gateId} value={gateId}>{gateId}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
 
           {/* Camera Scanning Core Box */}
@@ -522,12 +579,14 @@ export default function CheckinPortalPage() {
                 type="text"
                 value={manualTicketId}
                 onChange={(e) => setManualTicketId(e.target.value)}
+                disabled={!selectedConcertId}
                 placeholder="Nhập thủ công mã Ticket ID (nếu QR hỏng)..."
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <button
                 type="submit"
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 rounded-xl text-xs font-bold border border-slate-700 transition-all"
+                disabled={!selectedConcertId}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 rounded-xl text-xs font-bold border border-slate-700 transition-all disabled:cursor-not-allowed disabled:opacity-50"
               >
                 KIỂM TRA
               </button>
@@ -563,7 +622,7 @@ export default function CheckinPortalPage() {
                 }`}>
                   {scanResult.status === 'VALID' && <CheckCircle className="w-8 h-8" />}
                   {scanResult.status === 'ALREADY_USED' && <AlertTriangle className="w-8 h-8" />}
-                  {(scanResult.status === 'INVALID_TICKET' || scanResult.status === 'WRONG_CONCERT' || scanResult.status === 'WRONG_DATE') && <XCircle className="w-8 h-8" />}
+                  {(scanResult.status === 'INVALID_TICKET' || scanResult.status === 'WRONG_CONCERT' || scanResult.status === 'WRONG_DATE' || scanResult.status === 'CANCELLED') && <XCircle className="w-8 h-8" />}
                 </div>
 
                 <div className="flex-1">
@@ -667,7 +726,7 @@ export default function CheckinPortalPage() {
                 Lịch sử quét hiện tại
               </h3>
               
-              {offlineLogs.length === 0 ? (
+              {currentOfflineLogs.length === 0 ? (
                 <div className="text-center py-12 text-slate-600 flex-1 flex flex-col justify-center">
                   <CheckCircle className="w-12 h-12 text-slate-800 mx-auto mb-3" />
                   <p className="text-sm font-bold">Không có vé offline chưa sync</p>
@@ -676,11 +735,11 @@ export default function CheckinPortalPage() {
               ) : (
                 <div className="flex-1 flex flex-col">
                   <div className="text-xs text-amber-400 font-bold bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl mb-4">
-                    ⚠️ Phát hiện {offlineLogs.length} bản ghi quét offline chưa được đồng bộ lên máy chủ. Kết nối mạng để tiến hành đồng bộ.
+                    Phát hiện {currentOfflineLogs.length} bản ghi offline chưa đồng bộ. Kết nối mạng để tiến hành đồng bộ.
                   </div>
                   
                   <div className="space-y-2.5 overflow-y-auto max-h-[300px] pr-1 flex-1">
-                    {offlineLogs.map((log, index) => (
+                    {currentOfflineLogs.map((log, index) => (
                       <div key={index} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex justify-between items-center">
                         <div>
                           <p className="text-xs font-mono text-indigo-400 font-bold tracking-wider">{log.ticketId.substring(0, 16)}...</p>

@@ -206,6 +206,55 @@ export interface StaffUser {
   createdAt: string;
 }
 
+export interface CheckinConcert {
+  id: string;
+  eventCode: string;
+  name: string;
+  venue: string;
+  startAt: string;
+  status: string;
+  gateIds: string[];
+}
+
+export interface ScanResult {
+  status: 'VALID' | 'ALREADY_USED' | 'INVALID_TICKET' | 'WRONG_CONCERT' | 'WRONG_DATE' | 'CANCELLED';
+  checkedInAt?: string;
+  deviceId?: string | null;
+  ticket?: {
+    id: string;
+    seatNumber: string | null;
+    ticketType: string;
+    usedAt: string;
+  };
+}
+
+export interface SyncResult {
+  syncedCount: number;
+  conflictCount: number;
+  conflicts: Array<{ ticketId: string; scannedAtLocal: string; reason: string }>;
+}
+
+export interface VipGuestDetail {
+  id: string;
+  fullName: string;
+  identifier: string;
+  zone: string;
+  ticketDetails: {
+    ticketId: string;
+    ticketType: string;
+    status: string;
+    checkedIn: boolean;
+    checkedInAt: string | null;
+  } | null;
+}
+
+export interface CheckinStats {
+  totalTickets: number;
+  checkedInTickets: number;
+  percent: number;
+  byTicketType: Record<string, { total: number; checkedIn: number; percent: number }>;
+}
+
 export interface RevenueSummary {
   concertId: string;
   paidOrders: number;
@@ -441,6 +490,48 @@ export const adminApi = {
   },
   getGuestImportReport(token: string, id: string) {
     return apiRequest<GuestImportReport>(`/vip-guest-sync/import-reports/${id}`, { token });
+  },
+  listCheckinConcerts(token: string) {
+    return apiRequest<CheckinConcert[]>('/checkins/concerts', { token });
+  },
+  scanTicket(
+    token: string,
+    payload: { ticketId: string; deviceId: string; scannedAtLocal: string; concertId: string }
+  ) {
+    return apiRequest<ScanResult>('/checkins/scan', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(payload),
+    });
+  },
+  syncOfflineLogs(
+    token: string,
+    payload: {
+      concertId: string;
+      deviceId: string;
+      logs: Array<{ ticketId: string; scannedAtLocal: string }>;
+    }
+  ) {
+    return apiRequest<SyncResult>('/checkins/sync', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(payload),
+    });
+  },
+  fetchVipGuests(token: string, concertId: string, query = '') {
+    const params = new URLSearchParams({ concertId });
+    if (query) params.set('query', query);
+    return apiRequest<VipGuestDetail[]>(`/checkins/vip-guests?${params.toString()}`, { token });
+  },
+  checkinVipGuest(token: string, vipGuestId: string, deviceId: string) {
+    return apiRequest<ScanResult>(`/checkins/vip-guests/${vipGuestId}/checkin`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ deviceId }),
+    });
+  },
+  fetchCheckinStats(token: string, concertId: string) {
+    return apiRequest<CheckinStats>(`/checkins/stats/${concertId}`, { token });
   },
 };
 

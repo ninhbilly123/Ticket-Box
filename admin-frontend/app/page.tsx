@@ -29,6 +29,7 @@ import {
   formatMoney,
 } from '../lib/api';
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
+import CheckinWorkspace from '../components/checkin-workspace';
 
 type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 
@@ -120,11 +121,12 @@ export default function AdminHomePage() {
 
     try {
       const parsed = JSON.parse(raw) as AuthSession;
-      setSession(parsed);
-      adminApi.me(parsed.accessToken).catch(() => {
-        localStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      });
+      adminApi.me(parsed.accessToken)
+        .then((user) => setSession({ ...parsed, user }))
+        .catch(() => {
+          localStorage.removeItem(SESSION_KEY);
+          setSession(null);
+        });
     } catch {
       localStorage.removeItem(SESSION_KEY);
     }
@@ -248,8 +250,8 @@ export default function AdminHomePage() {
                 </div>
               </div>
               <div className="max-w-xl">
-                <p className="text-sm uppercase tracking-[0.24em] text-cyan-300">Core Backend API</p>
-                <h2 className="mt-4 text-4xl font-semibold leading-tight">Manage concerts, inventory, staff, and revenue.</h2>
+                <p className="text-sm uppercase tracking-[0.24em] text-cyan-300">Operations Portal</p>
+                <h2 className="mt-4 text-4xl font-semibold leading-tight">Quản trị sự kiện và vận hành cổng soát vé.</h2>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3 text-xs text-slate-300">
@@ -263,7 +265,7 @@ export default function AdminHomePage() {
             <form onSubmit={handleLogin} className="w-full max-w-sm space-y-5">
               <div>
                 <h2 className="text-xl font-semibold">Sign in</h2>
-                <p className="mt-1 text-sm text-slate-500">Use the organizer seed account.</p>
+                <p className="mt-1 text-sm text-slate-500">Dùng tài khoản organizer hoặc nhân viên soát vé.</p>
               </div>
               <Field label="Email">
                 <input
@@ -293,13 +295,17 @@ export default function AdminHomePage() {
     );
   }
 
+  if (session.user.role === 'CHECKIN_STAFF') {
+    return <CheckinWorkspace session={session} onLogout={() => void handleLogout()} />;
+  }
+
   if (!isOrganizer) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#eef3f8] p-6">
         <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
           <AlertTriangle className="mx-auto h-10 w-10 text-rose-600" />
           <h1 className="mt-4 text-xl font-semibold">Access denied</h1>
-          <p className="mt-2 text-sm text-slate-500">Only ORGANIZER accounts can use this console.</p>
+          <p className="mt-2 text-sm text-slate-500">Tài khoản này không có quyền sử dụng cổng vận hành.</p>
           <button onClick={handleLogout} className="secondary-button mt-6 w-full" type="button">
             <LogOut className="h-4 w-4" />
             Sign out
