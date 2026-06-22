@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'TicketBox Admin',
-  description: 'TicketBox organizer dashboard',
+  title: 'TicketBox - Cổng quản trị',
+  description: 'Cổng quản trị và vận hành TicketBox',
 };
 
 export default function RootLayout({

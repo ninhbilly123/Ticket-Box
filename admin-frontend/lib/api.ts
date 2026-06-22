@@ -301,7 +301,7 @@ interface ApiEnvelope<T> {
 async function parseResponse<T>(response: Response): Promise<T> {
   const json = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok || !json.success) {
-    const message = json.error?.message || `Request failed with status ${response.status}`;
+    const message = json.error?.message || `Yêu cầu thất bại với mã trạng thái ${response.status}`;
     const error = new Error(message);
     (error as Error & { code?: string }).code = json.error?.code;
     throw error;

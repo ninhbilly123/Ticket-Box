@@ -26,6 +26,7 @@ import {
   adminApi,
 } from '../lib/api';
 import { Html5Qrcode } from 'html5-qrcode';
+import { formatStatusLabel } from '../lib/ui-labels';
 
 interface CheckinWorkspaceProps {
   session: AuthSession;
@@ -142,11 +143,11 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
         if (data.length > 0) {
           setSelectedConcertId(data[0].id);
         } else {
-          setScanErrorMsg('Bạn chưa được phân công soát vé cho concert nào.');
+          setScanErrorMsg('Bạn chưa được phân công soát vé cho sự kiện nào.');
         }
       } catch (err) {
         console.error('Failed to load concerts:', err);
-        setScanErrorMsg((err as Error).message || 'Không thể tải concert được phân công.');
+        setScanErrorMsg((err as Error).message || 'Không thể tải sự kiện được phân công.');
       }
     };
 
@@ -227,7 +228,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
       }
     } catch (err: any) {
       console.error('[Sync Error]', err);
-      setSyncSummary(`Lỗi đồng bộ: ${err.message || 'Không kết nối được server'}`);
+      setSyncSummary(`Lỗi đồng bộ: ${err.message || 'Không kết nối được máy chủ'}`);
     } finally {
       setSyncingOffline(false);
     }
@@ -260,7 +261,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
         );
       } catch (err: any) {
         console.error('Camera startup error:', err);
-        setScanErrorMsg('Không thể mở camera. Vui lòng cấp quyền truy cập camera.');
+        setScanErrorMsg('Không thể mở máy quét QR. Vui lòng cấp quyền truy cập thiết bị ghi hình.');
         setIsScanning(false);
       }
     }, 200);
@@ -303,7 +304,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
         playSound('warning');
         setScanResult({
           status: 'ALREADY_USED',
-          deviceId: 'Thiết bị này (Quét Offline)',
+          deviceId: 'Thiết bị này (quét ngoại tuyến)',
         });
       } else {
         // Lưu tạm vào LocalStorage
@@ -315,8 +316,8 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
           status: 'VALID',
           ticket: {
             id: trimmedId,
-            seatNumber: 'Offline',
-            ticketType: 'Vé Offline',
+            seatNumber: 'Ngoại tuyến',
+            ticketType: 'Vé ngoại tuyến',
             usedAt: scannedTime,
           },
         });
@@ -378,10 +379,10 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
       
       if (result.status === 'VALID') {
         playSound('success');
-        alert(`Check-in Khách VIP Thành Công!\nHạng vé: ${result.ticket?.ticketType}`);
+        alert(`Soát vé khách VIP thành công!\nHạng vé: ${result.ticket?.ticketType}`);
       } else {
         playSound('error');
-        alert(`Lỗi soát vé VIP: ${result.status}`);
+        alert(`Lỗi soát vé VIP: ${formatStatusLabel(result.status)}`);
       }
       loadVipGuests(); // Reload list
     } catch (err: any) {
@@ -415,7 +416,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
-              TICKETBOX GATEKEEPER
+              TICKETBOX SOÁT VÉ
             </h1>
             <p className="text-xs text-slate-500 font-semibold">Cổng soát vé di động chuyên nghiệp</p>
           </div>
@@ -431,7 +432,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
               : 'bg-rose-950/80 text-rose-400 border border-rose-800/60 animate-pulse'
           }`}>
             {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-            {isOnline ? 'ONLINE' : 'OFFLINE'}
+            {isOnline ? 'TRỰC TUYẾN' : 'NGOẠI TUYẾN'}
           </div>
 
           {/* Máy quét */}
@@ -489,7 +490,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                   className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   {concerts.length === 0 ? (
-                    <option value="">Chưa có concert được phân công</option>
+                    <option value="">Chưa có sự kiện được phân công</option>
                   ) : (
                     concerts.map((concert) => (
                       <option key={concert.id} value={concert.id}>
@@ -523,7 +524,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
             <div className="p-4 bg-slate-900/60 border-b border-slate-800 flex justify-between items-center">
               <span className="text-sm font-bold text-slate-300 flex items-center gap-2">
                 <Camera className="w-4 h-4 text-indigo-400" />
-                CAMERA QUÉT QR VÉ
+                MÁY QUÉT QR VÉ
               </span>
               
               {isScanning ? (
@@ -531,7 +532,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                   onClick={stopScanner}
                   className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-500/20 transition-all"
                 >
-                  TẮT CAMERA
+                  TẮT MÁY QUÉT
                 </button>
               ) : (
                 <button
@@ -539,7 +540,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                   disabled={!selectedConcertId}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/25 transition-all disabled:opacity-50"
                 >
-                  BẬT CAMERA QUÉT VÉ
+                  BẬT MÁY QUÉT VÉ
                 </button>
               )}
             </div>
@@ -553,8 +554,8 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                   <div className="w-16 h-16 bg-slate-900 border border-slate-800 text-slate-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
                     <Camera className="w-8 h-8" />
                   </div>
-                  <p className="text-slate-400 font-medium text-sm">Camera chưa được kích hoạt</p>
-                  <p className="text-slate-600 text-xs mt-1">Click nút 'Bật Camera' ở trên để bắt đầu soát vé</p>
+                  <p className="text-slate-400 font-medium text-sm">Máy quét chưa được kích hoạt</p>
+                  <p className="text-slate-600 text-xs mt-1">Nhấn nút 'Bật máy quét vé' ở trên để bắt đầu</p>
                 </div>
               )}
 
@@ -580,7 +581,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                 value={manualTicketId}
                 onChange={(e) => setManualTicketId(e.target.value)}
                 disabled={!selectedConcertId}
-                placeholder="Nhập thủ công mã Ticket ID (nếu QR hỏng)..."
+                placeholder="Nhập thủ công mã vé (nếu QR hỏng)..."
                 className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <button
@@ -632,7 +633,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                     {scanResult.status === 'VALID' && 'VÉ HỢP LỆ — CHO VÀO'}
                     {scanResult.status === 'ALREADY_USED' && 'CẢNH BÁO — VÉ ĐÃ SỬ DỤNG'}
                     {scanResult.status === 'INVALID_TICKET' && 'VÉ KHÔNG HỢP LỆ (VÉ GIẢ)'}
-                    {scanResult.status === 'WRONG_CONCERT' && 'VÉ KHÔNG THUỘC CONCERT NÀY'}
+                    {scanResult.status === 'WRONG_CONCERT' && 'VÉ KHÔNG THUỘC SỰ KIỆN NÀY'}
                     {scanResult.status === 'WRONG_DATE' && 'SAI NGÀY DIỄN RA ĐÊM NHẠC'}
                   </h3>
 
@@ -644,7 +645,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                         <span className="text-white text-sm">{scanResult.ticket.ticketType}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block font-normal text-[10px] uppercase">Số ghế / Khu vực</span>
+                        <span className="text-slate-400 block font-normal text-[10px] uppercase">Khu vực</span>
                         <span className="text-white text-sm">{scanResult.ticket.seatNumber || 'GA (Không số ghế)'}</span>
                       </div>
                       <div className="col-span-2 border-t border-white/5 pt-2 mt-1">
@@ -729,13 +730,13 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
               {currentOfflineLogs.length === 0 ? (
                 <div className="text-center py-12 text-slate-600 flex-1 flex flex-col justify-center">
                   <CheckCircle className="w-12 h-12 text-slate-800 mx-auto mb-3" />
-                  <p className="text-sm font-bold">Không có vé offline chưa sync</p>
+                  <p className="text-sm font-bold">Không có vé ngoại tuyến chưa đồng bộ</p>
                   <p className="text-xs mt-1">Tất cả dữ liệu đã được đẩy trực tiếp lên hệ thống.</p>
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col">
                   <div className="text-xs text-amber-400 font-bold bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl mb-4">
-                    Phát hiện {currentOfflineLogs.length} bản ghi offline chưa đồng bộ. Kết nối mạng để tiến hành đồng bộ.
+                    Phát hiện {currentOfflineLogs.length} bản ghi ngoại tuyến chưa đồng bộ. Kết nối mạng để tiến hành đồng bộ.
                   </div>
                   
                   <div className="space-y-2.5 overflow-y-auto max-h-[300px] pr-1 flex-1">
@@ -748,7 +749,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                           </p>
                         </div>
                         <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-md font-bold uppercase border border-amber-500/10">
-                          OFFLINE
+                          NGOẠI TUYẾN
                         </span>
                       </div>
                     ))}
@@ -759,7 +760,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
                     disabled={syncingOffline || !isOnline}
                     className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white py-3 rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 disabled:shadow-none"
                   >
-                    {syncingOffline ? 'Đang đồng bộ...' : 'ĐỒNG BỘ DỮ LIỆU OFFLINE'}
+                    {syncingOffline ? 'Đang đồng bộ...' : 'ĐỒNG BỘ DỮ LIỆU NGOẠI TUYẾN'}
                   </button>
                 </div>
               )}
@@ -770,9 +771,9 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
           {activeTab === 'vip' && (
             <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-xl flex-1 flex flex-col min-h-[400px]">
               <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center justify-between">
-                Danh sách khách VIP (Guest List)
+                Danh sách khách VIP
                 <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/15 px-2.5 py-0.5 rounded-full font-bold">
-                  CSV Import
+                  Nhập CSV
                 </span>
               </h3>
 
@@ -877,7 +878,7 @@ export default function CheckinWorkspace({ session, onLogout }: CheckinWorkspace
               {loadingStats ? (
                 <p className="text-center py-8 text-xs text-slate-500 animate-pulse">Đang tính toán số liệu...</p>
               ) : !stats ? (
-                <p className="text-center py-8 text-xs text-slate-600">Chọn concert để xem dữ liệu thống kê soát vé.</p>
+                <p className="text-center py-8 text-xs text-slate-600">Chọn sự kiện để xem dữ liệu thống kê soát vé.</p>
               ) : (
                 <div className="space-y-5 flex-1 flex flex-col justify-between">
                   

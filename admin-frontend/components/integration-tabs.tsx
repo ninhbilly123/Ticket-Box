@@ -19,6 +19,7 @@ import {
   SponsorEmail,
   adminApi,
 } from '../lib/api';
+import { formatStatusLabel } from '../lib/ui-labels';
 
 interface IntegrationProps {
   token: string;
@@ -155,7 +156,7 @@ export function SponsorEmailTab({ token, concerts }: IntegrationProps) {
                   <tr>
                     <th>Nhãn hàng</th>
                     <th>Email</th>
-                    <th>Event code</th>
+                    <th>Mã eventCode</th>
                     <th>Trạng thái</th>
                     <th>Thao tác</th>
                   </tr>
@@ -228,7 +229,7 @@ export function SponsorEmailTab({ token, concerts }: IntegrationProps) {
                 onChange={(allowedEventCodes) => setForm({ ...form, allowedEventCodes })}
               />
             </Field>
-            <p className="text-xs text-slate-500">Không chọn sự kiện nghĩa là email được phép gửi cho tất cả event code.</p>
+              <p className="text-xs text-slate-500">Không chọn sự kiện nghĩa là email được phép gửi cho mọi eventCode.</p>
             <div className="flex gap-2">
               <button className="primary-button flex-1" disabled={saving} type="submit">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -301,11 +302,11 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
       return;
     }
     if (nextFile.type !== 'application/pdf' && !nextFile.name.toLowerCase().endsWith('.pdf')) {
-      setError('Chỉ chấp nhận file PDF.');
+      setError('Chỉ chấp nhận tệp PDF.');
       return;
     }
     if (nextFile.size > 10 * 1024 * 1024) {
-      setError('File PDF không được vượt quá 10 MB.');
+      setError('Tệp PDF không được vượt quá 10 MB.');
       return;
     }
     setFile(nextFile);
@@ -314,7 +315,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
   async function uploadPdf(event: FormEvent) {
     event.preventDefault();
     if (!selectedConcertId || !file) {
-      setError('Vui lòng chọn file PDF trước khi upload.');
+      setError('Vui lòng chọn tệp PDF trước khi tải lên.');
       return;
     }
     setSaving(true);
@@ -325,7 +326,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
       setArtistBio(created);
       setReviewedBio('');
       setFile(null);
-      setNotice('Đã upload PDF. Hệ thống đang tạo bio.');
+    setNotice('Đã tải lên PDF. Hệ thống đang tạo tiểu sử.');
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -335,7 +336,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
 
   async function reviewBio() {
     if (!artistBio || !reviewedBio.trim()) {
-      setError('Nội dung bio duyệt không được để trống.');
+      setError('Nội dung tiểu sử duyệt không được để trống.');
       return;
     }
     setSaving(true);
@@ -346,7 +347,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
       if (!updated) throw new Error('Backend không trả về Artist Bio sau khi phê duyệt.');
       setArtistBio(updated);
       setReviewedBio(updated.reviewedBio || '');
-      setNotice('Đã lưu và duyệt nội dung bio.');
+      setNotice('Đã lưu và duyệt nội dung tiểu sử.');
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -356,16 +357,16 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
 
   async function publishBio() {
     if (!artistBio || artistBio.status !== 'APPROVED') return;
-    if (!window.confirm('Publish bio này lên trang concert?')) return;
+    if (!window.confirm('Công khai tiểu sử này trên trang sự kiện?')) return;
     setSaving(true);
     setError(null);
     setNotice(null);
     try {
       const updated = await adminApi.publishArtistBio(token, artistBio.id);
-      if (!updated) throw new Error('Backend không trả về Artist Bio sau khi publish.');
+      if (!updated) throw new Error('Máy chủ không trả về tiểu sử nghệ sĩ sau khi công khai.');
       setArtistBio(updated);
       setReviewedBio(updated.reviewedBio || '');
-      setNotice('Bio đã được publish.');
+      setNotice('Tiểu sử đã được công khai.');
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -379,7 +380,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
   return (
     <div className="space-y-5">
       <PageMessage error={error} notice={notice} />
-      <IntegrationPanel title="Concert">
+        <IntegrationPanel title="Chọn sự kiện">
         <ConcertSelector
           concerts={concerts}
           selectedConcertId={selectedConcertId}
@@ -388,15 +389,15 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
       </IntegrationPanel>
 
       {!selectedConcert ? (
-        <EmptyState text="Chưa có concert để quản lý AI Artist Bio." />
+          <EmptyState text="Chưa có sự kiện để quản lý tiểu sử nghệ sĩ AI." />
       ) : (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <div className="space-y-5">
             <IntegrationPanel title="Xử lý hồ sơ nghệ sĩ">
               <form className="space-y-4" onSubmit={uploadPdf}>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Event code" value={selectedConcert.eventCode} />
-                  <Info label="Trạng thái" value={artistBio?.status || 'CHƯA CÓ'} />
+                  <Info label="Mã eventCode" value={selectedConcert.eventCode} />
+                  <Info label="Trạng thái" value={artistBio ? formatStatusLabel(artistBio.status) : 'Chưa có'} />
                 </div>
                 {artistBio && (
                   <div className="border-y border-slate-100 py-3 text-sm">
@@ -415,7 +416,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
                 {artistBio?.status === 'FAILED' && artistBio.errorMessage && (
                   <InlineError message={artistBio.errorMessage} />
                 )}
-                <Field label="Upload PDF mới">
+                <Field label="Tải lên PDF mới">
                   <input
                     accept="application/pdf,.pdf"
                     className="block w-full text-sm text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200"
@@ -423,29 +424,29 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
                     type="file"
                   />
                 </Field>
-                <p className="text-xs text-slate-500">PDF tối đa 10 MB. Upload mới sẽ tạo một phiên bản bio mới.</p>
+                <p className="text-xs text-slate-500">PDF tối đa 10 MB. Mỗi lần tải lên sẽ tạo một phiên bản tiểu sử mới.</p>
                 <button className="primary-button w-full" disabled={saving || !file} type="submit">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  Upload và tạo bio
+                  Tải lên và tạo tiểu sử
                 </button>
               </form>
             </IntegrationPanel>
           </div>
 
-          <IntegrationPanel title="Nội dung Artist Bio">
+          <IntegrationPanel title="Nội dung tiểu sử nghệ sĩ">
             {loading ? (
-              <LoadingState text="Đang tải Artist Bio..." />
+              <LoadingState text="Đang tải tiểu sử nghệ sĩ..." />
             ) : !artistBio ? (
-              <EmptyState text="Concert này chưa có Artist Bio. Upload PDF để bắt đầu." />
+              <EmptyState text="Sự kiện này chưa có tiểu sử nghệ sĩ. Tải lên PDF để bắt đầu." />
             ) : artistBio.status === 'FAILED' ? (
-              <EmptyState text="Bio chưa được tạo thành công. Kiểm tra lỗi và upload lại PDF." />
+              <EmptyState text="Tiểu sử chưa được tạo thành công. Kiểm tra lỗi và tải lại PDF." />
             ) : isProcessing ? (
               <LoadingState text="Đang trích xuất PDF và tạo nội dung tiếng Việt..." />
             ) : artistBio.status === 'PUBLISHED' ? (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                   <StatusPill status="PUBLISHED" />
-                  <span className="text-xs text-slate-500">Publish: {formatDate(artistBio.publishedAt)}</span>
+                  <span className="text-xs text-slate-500">Công khai: {formatDate(artistBio.publishedAt)}</span>
                 </div>
                 <div className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
                   {artistBio.publishedBio || artistBio.reviewedBio}
@@ -455,9 +456,9 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <StatusPill status={artistBio.status} />
-                  <span className="text-xs text-slate-500">Chỉnh sửa trước khi publish</span>
+                  <span className="text-xs text-slate-500">Chỉnh sửa trước khi công khai</span>
                 </div>
-                <Field label="Bio đã duyệt">
+                <Field label="Tiểu sử đã duyệt">
                   <textarea
                     className="min-h-[320px] w-full resize-y rounded border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
                     disabled={!canReview}
@@ -470,7 +471,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
                     <CheckCircle2 className="h-4 w-4" /> Lưu và duyệt
                   </button>
                   <button className="primary-button" disabled={saving || artistBio.status !== 'APPROVED'} onClick={() => void publishBio()} type="button">
-                    <Send className="h-4 w-4" /> Publish
+                    <Send className="h-4 w-4" /> Công khai
                   </button>
                 </div>
               </div>
@@ -542,14 +543,14 @@ export function VipSyncTab({ token }: IntegrationProps) {
         {loading ? (
           <LoadingState text="Đang tải báo cáo đồng bộ..." />
         ) : reports.length === 0 ? (
-          <EmptyState text="Chưa có lần quét mailbox hoặc import CSV nào." />
+          <EmptyState text="Chưa có lần quét hộp thư hoặc nhập CSV nào." />
         ) : (
           <div className="overflow-x-auto">
             <table className="admin-table min-w-[1120px]">
               <thead>
                 <tr>
                   <th>Thời gian</th>
-                  <th>Sender / File</th>
+                  <th>Người gửi / Tệp</th>
                   <th>Trạng thái</th>
                   <th>Tổng</th>
                   <th>Thành công</th>
@@ -565,8 +566,8 @@ export function VipSyncTab({ token }: IntegrationProps) {
                     <td>{formatDate(report.createdAt)}</td>
                     <td>
                       <div className="max-w-[260px]">
-                        <p className="truncate font-medium text-slate-900">{report.senderEmail || 'Hệ thống cron'}</p>
-                        <p className="truncate text-xs text-slate-500">{report.originalFileName || 'Không có file'}</p>
+                        <p className="truncate font-medium text-slate-900">{report.senderEmail || 'Hệ thống định kỳ'}</p>
+                        <p className="truncate text-xs text-slate-500">{report.originalFileName || 'Không có tệp'}</p>
                       </div>
                     </td>
                     <td><StatusPill status={report.status} /></td>
@@ -590,7 +591,7 @@ export function VipSyncTab({ token }: IntegrationProps) {
 
       {selectedReportId && (
         <IntegrationPanel
-          title="Chi tiết import"
+          title="Chi tiết lần nhập"
           action={
             <button className="icon-button" onClick={() => setSelectedReportId(null)} title="Đóng chi tiết" type="button">
               <X className="h-4 w-4" />
@@ -599,7 +600,7 @@ export function VipSyncTab({ token }: IntegrationProps) {
         >
           {detailError && <InlineError message={detailError} />}
           {detailLoading || !detail ? (
-            <LoadingState text="Đang tải chi tiết report..." />
+            <LoadingState text="Đang tải chi tiết báo cáo..." />
           ) : (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-5 sm:grid-cols-3 lg:grid-cols-6">
@@ -616,7 +617,7 @@ export function VipSyncTab({ token }: IntegrationProps) {
               <section>
                 <h4 className="mb-3 text-sm font-semibold text-slate-900">Lỗi từng dòng</h4>
                 {!detail.rowErrors.length ? (
-                  <EmptyState text="Report không có lỗi dữ liệu theo dòng." />
+                  <EmptyState text="Báo cáo không có lỗi dữ liệu theo dòng." />
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="admin-table">
@@ -637,9 +638,9 @@ export function VipSyncTab({ token }: IntegrationProps) {
               </section>
 
               <section>
-                <h4 className="mb-3 text-sm font-semibold text-slate-900">Khách đã import</h4>
+                <h4 className="mb-3 text-sm font-semibold text-slate-900">Khách đã nhập</h4>
                 {!detail.vipGuests?.length ? (
-                  <EmptyState text="Report không có khách VIP mới." />
+                  <EmptyState text="Báo cáo không có khách VIP mới." />
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="admin-table min-w-[980px]">
@@ -679,7 +680,7 @@ function ConcertSelector({
 }) {
   return (
     <select className="select w-full" onChange={(event) => onChange(event.target.value)} value={selectedConcertId}>
-      <option value="">Chọn concert</option>
+      <option value="">Chọn sự kiện</option>
       {concerts.map((concert) => (
         <option key={concert.id} value={concert.id}>{concert.eventCode} · {concert.name}</option>
       ))}
@@ -696,7 +697,7 @@ function EventCodeSelector({
   selected: string[];
   onChange: (eventCodes: string[]) => void;
 }) {
-  if (!concerts.length) return <EmptyState text="Chưa có concert để chọn." />;
+  if (!concerts.length) return <EmptyState text="Chưa có sự kiện để chọn." />;
   return (
     <div className="max-h-52 space-y-1 overflow-y-auto rounded border border-slate-300 bg-white p-2">
       {concerts.map((concert) => {
@@ -750,7 +751,7 @@ function StatusPill({ status }: { status: string }) {
         : processing
           ? 'bg-cyan-50 text-cyan-800'
           : 'bg-slate-100 text-slate-700';
-  return <span className={`inline-flex max-w-full rounded px-2 py-1 text-xs font-semibold ${colors}`}>{status}</span>;
+  return <span className={`inline-flex max-w-full rounded px-2 py-1 text-xs font-semibold ${colors}`}>{formatStatusLabel(status)}</span>;
 }
 
 function PageMessage({ error, notice }: { error: string | null; notice: string | null }) {

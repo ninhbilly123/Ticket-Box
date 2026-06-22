@@ -32,21 +32,22 @@ import {
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
 import CheckinWorkspace from '../components/checkin-workspace';
 import ConcertSetup from '../components/concert-setup';
+import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
 type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 
 const SESSION_KEY = 'ticketbox_admin_session';
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
-  { key: 'overview', label: 'Overview', icon: BarChart3 },
-  { key: 'concerts', label: 'Concerts', icon: CalendarClock },
-  { key: 'tickets', label: 'Ticket Types', icon: Ticket },
-  { key: 'staff', label: 'Staff', icon: Users },
-  { key: 'whitelist', label: 'Whitelist', icon: MailCheck },
+  { key: 'overview', label: 'Tổng quan', icon: BarChart3 },
+  { key: 'concerts', label: 'Sự kiện', icon: CalendarClock },
+  { key: 'tickets', label: 'Loại vé', icon: Ticket },
+  { key: 'staff', label: 'Nhân viên', icon: Users },
+  { key: 'whitelist', label: 'Email cho phép', icon: MailCheck },
   { key: 'sponsors', label: 'Email nhãn hàng', icon: Building2 },
-  { key: 'ai-bio', label: 'AI Artist Bio', icon: BrainCircuit },
-  { key: 'vip-sync', label: 'VIP Sync', icon: RefreshCw },
-  { key: 'revenue', label: 'Revenue', icon: ClipboardList },
+  { key: 'ai-bio', label: 'Tiểu sử nghệ sĩ AI', icon: BrainCircuit },
+  { key: 'vip-sync', label: 'Đồng bộ khách VIP', icon: RefreshCw },
+  { key: 'revenue', label: 'Doanh thu', icon: ClipboardList },
 ];
 
 const emptyConcertForm = {
@@ -109,7 +110,7 @@ export default function AdminHomePage() {
   const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
   const [whitelistForm, setWhitelistForm] = useState(emptyWhitelistForm);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
-  const [cancelReason, setCancelReason] = useState('Cancelled by organizer');
+  const [cancelReason, setCancelReason] = useState('Ban tổ chức hủy sự kiện');
 
   const token = session?.accessToken || '';
   const selectedConcert = useMemo(
@@ -199,7 +200,7 @@ export default function AdminHomePage() {
       const nextSession = await adminApi.login(loginForm.email, loginForm.password);
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
       setSession(nextSession);
-      setNotice(`Signed in as ${nextSession.user.role}`);
+      setNotice(`Đã đăng nhập với vai trò ${formatRoleLabel(nextSession.user.role)}.`);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -248,18 +249,18 @@ export default function AdminHomePage() {
                   <Shield className="h-6 w-6" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold">TicketBox Admin</h1>
-                  <p className="text-sm text-slate-400">Operations console</p>
+                  <h1 className="text-2xl font-bold">TicketBox Quản trị</h1>
+                  <p className="text-sm text-slate-400">Cổng vận hành</p>
                 </div>
               </div>
               <div className="max-w-xl">
-                <p className="text-sm uppercase tracking-[0.24em] text-cyan-300">Operations Portal</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-cyan-300">Hệ thống vận hành</p>
                 <h2 className="mt-4 text-4xl font-semibold leading-tight">Quản trị sự kiện và vận hành cổng soát vé.</h2>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3 text-xs text-slate-300">
-              <Metric label="Roles" value="3" />
-              <Metric label="Port" value="3002" />
+              <Metric label="Vai trò" value="3" />
+              <Metric label="Cổng mạng" value="3002" />
               <Metric label="API" value="3000" />
             </div>
           </section>
@@ -267,8 +268,8 @@ export default function AdminHomePage() {
           <section className="flex items-center justify-center p-8">
             <form onSubmit={handleLogin} className="w-full max-w-sm space-y-5">
               <div>
-                <h2 className="text-xl font-semibold">Sign in</h2>
-                <p className="mt-1 text-sm text-slate-500">Dùng tài khoản organizer hoặc nhân viên soát vé.</p>
+                <h2 className="text-xl font-semibold">Đăng nhập</h2>
+                <p className="mt-1 text-sm text-slate-500">Dùng tài khoản ban tổ chức hoặc nhân viên soát vé.</p>
               </div>
               <Field label="Email">
                 <input
@@ -278,7 +279,7 @@ export default function AdminHomePage() {
                   type="email"
                 />
               </Field>
-              <Field label="Password">
+              <Field label="Mật khẩu">
                 <input
                   value={loginForm.password}
                   onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
@@ -289,7 +290,7 @@ export default function AdminHomePage() {
               {error && <Alert message={error} />}
               <button disabled={loading} className="primary-button w-full" type="submit">
                 <Shield className="h-4 w-4" />
-                {loading ? 'Signing in...' : 'Sign in'}
+                {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
               </button>
             </form>
           </section>
@@ -307,11 +308,11 @@ export default function AdminHomePage() {
       <main className="flex min-h-screen items-center justify-center bg-[#eef3f8] p-6">
         <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
           <AlertTriangle className="mx-auto h-10 w-10 text-rose-600" />
-          <h1 className="mt-4 text-xl font-semibold">Access denied</h1>
+          <h1 className="mt-4 text-xl font-semibold">Truy cập bị từ chối</h1>
           <p className="mt-2 text-sm text-slate-500">Tài khoản này không có quyền sử dụng cổng vận hành.</p>
           <button onClick={handleLogout} className="secondary-button mt-6 w-full" type="button">
             <LogOut className="h-4 w-4" />
-            Sign out
+            Đăng xuất
           </button>
         </div>
       </main>
@@ -329,7 +330,7 @@ export default function AdminHomePage() {
               </div>
               <div>
                 <h1 className="font-semibold">TicketBox</h1>
-                <p className="text-xs text-slate-500">Admin console</p>
+                <p className="text-xs text-slate-500">Cổng quản trị</p>
               </div>
             </div>
           </div>
@@ -356,7 +357,7 @@ export default function AdminHomePage() {
           <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{session.user.role}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{formatRoleLabel(session.user.role)}</p>
                 <h2 className="text-2xl font-semibold">{activeTitle(activeTab)}</h2>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -371,12 +372,12 @@ export default function AdminHomePage() {
                     </option>
                   ))}
                 </select>
-                <button onClick={() => void loadAll()} className="icon-button" title="Refresh" type="button">
+                <button onClick={() => void loadAll()} className="icon-button" title="Tải lại" type="button">
                   <RefreshCw className="h-4 w-4" />
                 </button>
                 <button onClick={handleLogout} className="secondary-button" type="button">
                   <LogOut className="h-4 w-4" />
-                  Sign out
+                  Đăng xuất
                 </button>
               </div>
             </div>
@@ -386,7 +387,7 @@ export default function AdminHomePage() {
             {error && <Alert message={error} />}
             {notice && <Success message={notice} />}
             {loading ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-8 text-sm text-slate-500">Loading admin data...</div>
+              <div className="rounded-lg border border-slate-200 bg-white p-8 text-sm text-slate-500">Đang tải dữ liệu quản trị...</div>
             ) : (
               renderTab()
             )}
@@ -401,27 +402,27 @@ export default function AdminHomePage() {
       return (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <Stat label="Concerts" value={concerts.length} icon={CalendarClock} />
-            <Stat label="Ticket types" value={ticketTypes.length} icon={Ticket} />
-            <Stat label="Tickets sold" value={revenue?.ticketsSold || 0} icon={BadgeCheck} />
-            <Stat label="Revenue" value={formatMoney(revenue?.totalRevenue || 0)} icon={BarChart3} />
+            <Stat label="Sự kiện" value={concerts.length} icon={CalendarClock} />
+            <Stat label="Loại vé" value={ticketTypes.length} icon={Ticket} />
+            <Stat label="Vé đã bán" value={revenue?.ticketsSold || 0} icon={BadgeCheck} />
+            <Stat label="Doanh thu" value={formatMoney(revenue?.totalRevenue || 0)} icon={BarChart3} />
           </div>
-          <Panel title="Current concert">
+          <Panel title="Sự kiện đang chọn">
             {selectedConcert ? (
               <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-5">
-                <Info label="Name" value={selectedConcert.name} />
-                <Info label="Event code" value={selectedConcert.eventCode} />
-                <Info label="Status" value={selectedConcert.status} />
-                <Info label="Venue" value={selectedConcert.venue} />
-                <Info label="Start" value={formatDate(selectedConcert.startAt)} />
+                <Info label="Tên" value={selectedConcert.name} />
+                <Info label="Mã eventCode" value={selectedConcert.eventCode} />
+                <Info label="Trạng thái" value={formatStatusLabel(selectedConcert.status)} />
+                <Info label="Địa điểm" value={selectedConcert.venue} />
+                <Info label="Bắt đầu" value={formatDate(selectedConcert.startAt)} />
               </div>
             ) : (
-              <EmptyState text="No concert available." />
+              <EmptyState text="Chưa có sự kiện." />
             )}
           </Panel>
-          <Panel title="Inventory snapshot">
+          <Panel title="Tổng quan tồn kho">
             <DataTable
-              headers={['Type', 'Price', 'Total', 'Available', 'Sold', 'Limit']}
+              headers={['Loại vé', 'Giá', 'Tổng', 'Còn lại', 'Đã bán', 'Giới hạn']}
               rows={ticketTypes.map((item) => [
                 item.name,
                 formatMoney(item.price),
@@ -440,17 +441,17 @@ export default function AdminHomePage() {
       return (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
-          <Panel title="Concerts">
+          <Panel title="Danh sách sự kiện">
             <div className="overflow-x-auto">
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Event code</th>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th>Venue</th>
-                    <th>Start</th>
-                    <th>Actions</th>
+                    <th>Mã eventCode</th>
+                    <th>Tên</th>
+                    <th>Trạng thái</th>
+                    <th>Địa điểm</th>
+                    <th>Bắt đầu</th>
+                    <th>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -469,7 +470,7 @@ export default function AdminHomePage() {
                             Cấu hình
                           </button>
                           <button
-                            onClick={() => runMutation(() => adminApi.cancelConcert(token, concert.id, cancelReason), 'Concert cancelled.')}
+                            onClick={() => runMutation(() => adminApi.cancelConcert(token, concert.id, cancelReason), 'Đã hủy sự kiện.')}
                             className="danger-small-button"
                             type="button"
                           >
@@ -483,7 +484,7 @@ export default function AdminHomePage() {
               </table>
             </div>
           </Panel>
-          <Panel title="Create concert">
+          <Panel title="Tạo sự kiện">
             <form
               className="space-y-3"
               onSubmit={(event) => {
@@ -507,11 +508,11 @@ export default function AdminHomePage() {
                     setSelectedConcertId(created.id);
                     setConcertForm(emptyConcertForm);
                   },
-                  'Đã tạo concert ở trạng thái DRAFT.'
+                    'Đã tạo sự kiện ở trạng thái bản nháp.'
                 );
               }}
             >
-              <Field label="Event code">
+              <Field label="Mã eventCode">
                 <input
                   aria-invalid={Boolean(concertFormError)}
                   className={`input uppercase ${concertFormError ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-100' : ''}`}
@@ -525,11 +526,11 @@ export default function AdminHomePage() {
                 />
                 {concertFormError && <span className="text-xs font-medium text-rose-700">{concertFormError}</span>}
               </Field>
-              <TextInput label="Name" required value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
-              <TextInput label="Venue" required value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
-              <TextInput label="Start at" required type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
-              <TextInput label="Sale open" required type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
-              <TextInput label="Description" value={concertForm.description} onChange={(value) => setConcertForm({ ...concertForm, description: value })} />
+              <TextInput label="Tên" required value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
+              <TextInput label="Địa điểm" required value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
+              <TextInput label="Thời gian bắt đầu" required type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
+              <TextInput label="Thời gian mở bán" required type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
+              <TextInput label="Mô tả" value={concertForm.description} onChange={(value) => setConcertForm({ ...concertForm, description: value })} />
               <label className="flex items-center justify-between rounded border border-slate-200 px-3 py-2.5">
                 <span className="text-sm font-medium">Sử dụng sơ đồ khu vực</span>
                 <input
@@ -541,13 +542,13 @@ export default function AdminHomePage() {
               </label>
               <button disabled={saving} className="primary-button w-full" type="submit">
                 <Check className="h-4 w-4" />
-                Create concert
+                Tạo sự kiện
               </button>
             </form>
           </Panel>
           </div>
           {selectedConcert && (
-            <Panel title="Cấu hình và publish">
+            <Panel title="Cấu hình và công khai">
               <ConcertSetup concert={selectedConcert} runMutation={runMutation} saving={saving} token={token} />
             </Panel>
           )}
@@ -558,19 +559,19 @@ export default function AdminHomePage() {
     if (activeTab === 'tickets') {
       return (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
-          <Panel title="Ticket type and inventory">
+          <Panel title="Loại vé và tồn kho">
             <div className="overflow-x-auto">
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Zone</th>
-                    <th>Price</th>
-                    <th>Total</th>
-                    <th>Available</th>
-                    <th>Sold</th>
-                    <th>Max/user</th>
-                    <th>Update total</th>
+                    <th>Tên</th>
+                    <th>Mã khu vực</th>
+                    <th>Giá</th>
+                    <th>Tổng</th>
+                    <th>Còn lại</th>
+                    <th>Đã bán</th>
+                    <th>Tối đa/tài khoản</th>
+                    <th>Cập nhật tổng</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -596,13 +597,13 @@ export default function AdminHomePage() {
                             onClick={() =>
                               runMutation(
                                 () => adminApi.updateInventory(token, item.id, Number(inventoryDrafts[item.id] || item.totalQuantity)),
-                                'Inventory updated.'
+                                'Đã cập nhật tồn kho.'
                               )
                             }
                             className="small-button"
                             type="button"
                           >
-                            Save
+                            Lưu
                           </button>
                         </div>
                       </td>
@@ -624,7 +625,7 @@ export default function AdminHomePage() {
               </table>
             </div>
           </Panel>
-          <Panel title="Create ticket type">
+          <Panel title="Tạo loại vé">
             <form
               className="space-y-3"
               onSubmit={(event) => {
@@ -647,17 +648,17 @@ export default function AdminHomePage() {
                 );
               }}
             >
-              <TextInput label="Name" required value={ticketTypeForm.name} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, name: value })} />
-              <TextInput label="Zone code" required value={ticketTypeForm.zoneCode} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, zoneCode: value.toUpperCase() })} />
-              <TextInput label="Price" required type="number" value={ticketTypeForm.price} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, price: value })} />
-              <TextInput label="Total quantity" required type="number" value={ticketTypeForm.totalQuantity} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, totalQuantity: value })} />
-              <TextInput label="Max per user" required type="number" value={ticketTypeForm.maxPerAccount} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, maxPerAccount: value })} />
-              <TextInput label="Sale open (optional)" type="datetime-local" value={ticketTypeForm.saleOpenAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleOpenAt: value })} />
-              <TextInput label="Sale close (optional)" type="datetime-local" value={ticketTypeForm.saleCloseAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleCloseAt: value })} />
-              {selectedConcert?.status !== 'DRAFT' && <p className="text-sm text-amber-700">Cấu hình loại vé đã khóa sau publish.</p>}
+              <TextInput label="Tên" required value={ticketTypeForm.name} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, name: value })} />
+              <TextInput label="Mã zoneCode" required value={ticketTypeForm.zoneCode} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, zoneCode: value.toUpperCase() })} />
+              <TextInput label="Giá" required type="number" value={ticketTypeForm.price} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, price: value })} />
+              <TextInput label="Tổng số lượng" required type="number" value={ticketTypeForm.totalQuantity} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, totalQuantity: value })} />
+              <TextInput label="Tối đa mỗi tài khoản" required type="number" value={ticketTypeForm.maxPerAccount} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, maxPerAccount: value })} />
+              <TextInput label="Mở bán riêng (không bắt buộc)" type="datetime-local" value={ticketTypeForm.saleOpenAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleOpenAt: value })} />
+              <TextInput label="Đóng bán riêng (không bắt buộc)" type="datetime-local" value={ticketTypeForm.saleCloseAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleCloseAt: value })} />
+              {selectedConcert?.status !== 'DRAFT' && <p className="text-sm text-amber-700">Cấu hình loại vé đã khóa sau khi công khai.</p>}
               <button disabled={saving || !selectedConcert || selectedConcert.status !== 'DRAFT'} className="primary-button w-full" type="submit">
                 <Ticket className="h-4 w-4" />
-                Create type
+                Tạo loại vé
               </button>
             </form>
           </Panel>
@@ -668,9 +669,9 @@ export default function AdminHomePage() {
     if (activeTab === 'staff') {
       return (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
-          <Panel title="Staff assignments">
+          <Panel title="Phân công nhân viên">
             <DataTable
-              headers={['Staff', 'Email', 'Gate', 'Created']}
+              headers={['Nhân viên', 'Email', 'Cổng', 'Ngày tạo']}
               rows={staffAssignments.map((item) => [
                 item.staff?.fullName || item.staffId,
                 item.staff?.email || '-',
@@ -680,17 +681,17 @@ export default function AdminHomePage() {
               actions={staffAssignments.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => runMutation(() => adminApi.deleteStaffAssignment(token, item.id), 'Assignment removed.')}
+                  onClick={() => runMutation(() => adminApi.deleteStaffAssignment(token, item.id), 'Đã gỡ phân công.')}
                   className="danger-small-button"
                   type="button"
                 >
-                  Remove
+                  Gỡ
                 </button>
               ))}
             />
           </Panel>
           <div className="space-y-5">
-            <Panel title="Create staff">
+            <Panel title="Tạo nhân viên">
               <form
                 className="space-y-3"
                 onSubmit={(event) => {
@@ -706,22 +707,22 @@ export default function AdminHomePage() {
                       setStaffForm((current) => ({ ...current, staffId: created.id }));
                       setStaffUserForm(emptyStaffUserForm);
                     },
-                    'Staff account created.'
+                    'Đã tạo tài khoản nhân viên.'
                   );
                 }}
               >
                 <TextInput label="Email" type="email" value={staffUserForm.email} onChange={(value) => setStaffUserForm({ ...staffUserForm, email: value })} />
-                <TextInput label="Full name" value={staffUserForm.fullName} onChange={(value) => setStaffUserForm({ ...staffUserForm, fullName: value })} />
-                <TextInput label="Phone" value={staffUserForm.phone} onChange={(value) => setStaffUserForm({ ...staffUserForm, phone: value })} />
-                <TextInput label="Password" type="password" value={staffUserForm.password} onChange={(value) => setStaffUserForm({ ...staffUserForm, password: value })} />
+                <TextInput label="Họ và tên" value={staffUserForm.fullName} onChange={(value) => setStaffUserForm({ ...staffUserForm, fullName: value })} />
+                <TextInput label="Số điện thoại" value={staffUserForm.phone} onChange={(value) => setStaffUserForm({ ...staffUserForm, phone: value })} />
+                <TextInput label="Mật khẩu" type="password" value={staffUserForm.password} onChange={(value) => setStaffUserForm({ ...staffUserForm, password: value })} />
                 <button disabled={saving} className="primary-button w-full" type="submit">
                   <Users className="h-4 w-4" />
-                  Create staff
+                  Tạo nhân viên
                 </button>
               </form>
             </Panel>
 
-            <Panel title="Assign staff">
+            <Panel title="Phân công nhân viên">
               <form
                 className="space-y-3"
                 onSubmit={(event) => {
@@ -729,14 +730,14 @@ export default function AdminHomePage() {
                   if (!selectedConcert) return;
                   void runMutation(
                     () => adminApi.createStaffAssignment(token, selectedConcert.id, staffForm.staffId, staffForm.gateId),
-                    'Staff assigned.'
+                    'Đã phân công nhân viên.'
                   );
                 }}
               >
                 {staffUsers.length > 0 ? (
-                  <Field label="Staff">
+                  <Field label="Nhân viên">
                     <select value={staffForm.staffId} onChange={(event) => setStaffForm({ ...staffForm, staffId: event.target.value })} className="select w-full">
-                      <option value="">Select staff</option>
+                      <option value="">Chọn nhân viên</option>
                       {staffUsers.map((user) => (
                         <option key={user.id} value={user.id}>
                           {user.fullName} - {user.email}
@@ -745,12 +746,12 @@ export default function AdminHomePage() {
                     </select>
                   </Field>
                 ) : (
-                  <TextInput label="Staff ID" value={staffForm.staffId} onChange={(value) => setStaffForm({ ...staffForm, staffId: value })} />
+                  <TextInput label="Mã nhân viên" value={staffForm.staffId} onChange={(value) => setStaffForm({ ...staffForm, staffId: value })} />
                 )}
-                <TextInput label="Gate ID" value={staffForm.gateId} onChange={(value) => setStaffForm({ ...staffForm, gateId: value })} />
+                <TextInput label="Mã cổng" value={staffForm.gateId} onChange={(value) => setStaffForm({ ...staffForm, gateId: value })} />
                 <button disabled={saving || !selectedConcert} className="primary-button w-full" type="submit">
                   <Users className="h-4 w-4" />
-                  Assign
+                  Phân công
                 </button>
               </form>
             </Panel>
@@ -762,29 +763,29 @@ export default function AdminHomePage() {
     if (activeTab === 'whitelist') {
       return (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
-          <Panel title="Whitelist email configs">
+          <Panel title="Cấu hình email cho phép">
             <DataTable
-              headers={['Mailbox', 'Sender', 'Keyword', 'Scope', 'Status']}
+              headers={['Hộp thư', 'Người gửi', 'Từ khóa', 'Phạm vi', 'Trạng thái']}
               rows={whitelistConfigs.map((item) => [
                 item.mailboxAddress,
                 item.allowedSenderEmail,
                 item.subjectKeyword,
                 item.concert?.name || item.organization?.name || item.organizationId,
-                item.status,
+                formatStatusLabel(item.status),
               ])}
               actions={whitelistConfigs.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => runMutation(() => adminApi.deleteWhitelistConfig(token, item.id), 'Whitelist config removed.')}
+                  onClick={() => runMutation(() => adminApi.deleteWhitelistConfig(token, item.id), 'Đã xóa cấu hình email cho phép.')}
                   className="danger-small-button"
                   type="button"
                 >
-                  Delete
+                  Xóa
                 </button>
               ))}
             />
           </Panel>
-          <Panel title="Create whitelist">
+          <Panel title="Tạo cấu hình email cho phép">
             <form
               className="space-y-3"
               onSubmit={(event) => {
@@ -798,16 +799,16 @@ export default function AdminHomePage() {
                       concertId: whitelistForm.concertId || selectedConcert?.id || undefined,
                       organizationId: whitelistForm.organizationId || session!.user.organizationId || undefined,
                     }),
-                  'Whitelist config created.'
+                  'Đã tạo cấu hình email cho phép.'
                 );
               }}
             >
-              <TextInput label="Mailbox" value={whitelistForm.mailboxAddress} onChange={(value) => setWhitelistForm({ ...whitelistForm, mailboxAddress: value })} />
-              <TextInput label="Allowed sender" value={whitelistForm.allowedSenderEmail} onChange={(value) => setWhitelistForm({ ...whitelistForm, allowedSenderEmail: value })} />
-              <TextInput label="Subject keyword" value={whitelistForm.subjectKeyword} onChange={(value) => setWhitelistForm({ ...whitelistForm, subjectKeyword: value })} />
+              <TextInput label="Hộp thư" value={whitelistForm.mailboxAddress} onChange={(value) => setWhitelistForm({ ...whitelistForm, mailboxAddress: value })} />
+              <TextInput label="Email người gửi được phép" value={whitelistForm.allowedSenderEmail} onChange={(value) => setWhitelistForm({ ...whitelistForm, allowedSenderEmail: value })} />
+              <TextInput label="Từ khóa tiêu đề" value={whitelistForm.subjectKeyword} onChange={(value) => setWhitelistForm({ ...whitelistForm, subjectKeyword: value })} />
               <button disabled={saving} className="primary-button w-full" type="submit">
                 <MailCheck className="h-4 w-4" />
-                Create config
+                Tạo cấu hình
               </button>
             </form>
           </Panel>
@@ -838,13 +839,13 @@ export default function AdminHomePage() {
       return (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Stat label="Paid orders" value={revenue?.paidOrders || 0} icon={ClipboardList} />
-            <Stat label="Tickets sold" value={revenue?.ticketsSold || 0} icon={BadgeCheck} />
-            <Stat label="Revenue" value={formatMoney(revenue?.totalRevenue || 0)} icon={BarChart3} />
+            <Stat label="Đơn đã thanh toán" value={revenue?.paidOrders || 0} icon={ClipboardList} />
+            <Stat label="Vé đã bán" value={revenue?.ticketsSold || 0} icon={BadgeCheck} />
+            <Stat label="Doanh thu" value={formatMoney(revenue?.totalRevenue || 0)} icon={BarChart3} />
           </div>
-          <Panel title="Revenue by ticket type">
+          <Panel title="Doanh thu theo loại vé">
             <DataTable
-              headers={['Ticket type', 'Quantity', 'Revenue']}
+              headers={['Loại vé', 'Số lượng', 'Doanh thu']}
               rows={Object.entries(revenue?.byTicketType || {}).map(([name, value]) => [
                 name,
                 value.quantity,
@@ -861,12 +862,12 @@ export default function AdminHomePage() {
 }
 
 function activeTitle(tab: TabKey) {
-  return tabs.find((item) => item.key === tab)?.label || 'Dashboard';
+  return tabs.find((item) => item.key === tab)?.label || 'Bảng điều khiển';
 }
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
-  return 'Unexpected error.';
+  return 'Đã xảy ra lỗi không xác định.';
 }
 
 function formatDate(value?: string | null) {
@@ -975,7 +976,7 @@ function StatusBadge({ status }: { status: string }) {
           : 'bg-slate-100 text-slate-700'
       }`}
     >
-      {status}
+      {formatStatusLabel(status)}
     </span>
   );
 }
@@ -994,7 +995,7 @@ function DataTable({
   actions?: React.ReactNode[];
 }) {
   if (rows.length === 0) {
-    return <EmptyState text="No records." />;
+    return <EmptyState text="Chưa có dữ liệu." />;
   }
 
   return (
@@ -1005,7 +1006,7 @@ function DataTable({
             {headers.map((header) => (
               <th key={header}>{header}</th>
             ))}
-            {actions && <th>Actions</th>}
+            {actions && <th>Thao tác</th>}
           </tr>
         </thead>
         <tbody>

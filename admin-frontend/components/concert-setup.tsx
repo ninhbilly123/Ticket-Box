@@ -91,7 +91,7 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
       : { description: form.description.trim() };
     void mutate(
       () => adminApi.updateConcert(token, concert.id, payload),
-      'Đã cập nhật cấu hình concert.'
+      'Đã cập nhật cấu hình sự kiện.'
     );
   }
 
@@ -117,22 +117,22 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
     <div className="mt-5 space-y-5">
       <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">Concert đang chọn</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">Sự kiện đang chọn</p>
           <h3 className="text-lg font-semibold">{concert.eventCode} · {concert.name}</h3>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-button" disabled={loading} onClick={() => void loadSetup()} title="Tải lại readiness" type="button">
+          <button className="icon-button" disabled={loading} onClick={() => void loadSetup()} title="Tải lại mức độ sẵn sàng" type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
           {isDraft && (
             <button
               className="primary-button"
               disabled={saving || !readiness?.ready}
-              onClick={() => void mutate(() => adminApi.publishConcert(token, concert.id), 'Concert đã được publish.')}
+              onClick={() => void mutate(() => adminApi.publishConcert(token, concert.id), 'Sự kiện đã được công khai.')}
               type="button"
             >
               <Send className="h-4 w-4" />
-              Publish
+              Công khai
             </button>
           )}
         </div>
@@ -140,9 +140,9 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
 
       <section className="border-b border-slate-200 pb-5">
         <div className="mb-3 flex items-center justify-between">
-          <h4 className="font-semibold">Readiness</h4>
+          <h4 className="font-semibold">Mức độ sẵn sàng</h4>
           <span className={`rounded px-2 py-1 text-xs font-semibold ${readiness?.ready ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-            {readiness?.ready ? 'Sẵn sàng publish' : 'Chưa sẵn sàng'}
+            {readiness?.ready ? 'Sẵn sàng công khai' : 'Chưa sẵn sàng'}
           </span>
         </div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -164,11 +164,11 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <section>
-          <h4 className="mb-3 font-semibold">Thông tin concert</h4>
+          <h4 className="mb-3 font-semibold">Thông tin sự kiện</h4>
           <form className="space-y-3" onSubmit={submitBasicInfo}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <SetupInput disabled={!isDraft} label="Mã sự kiện" onChange={(eventCode) => setForm({ ...form, eventCode })} value={form.eventCode} />
-              <SetupInput disabled={!isDraft} label="Tên concert" onChange={(name) => setForm({ ...form, name })} value={form.name} />
+              <SetupInput disabled={!isDraft} label="Mã eventCode" onChange={(eventCode) => setForm({ ...form, eventCode })} value={form.eventCode} />
+              <SetupInput disabled={!isDraft} label="Tên sự kiện" onChange={(name) => setForm({ ...form, name })} value={form.name} />
             </div>
             <SetupInput disabled={!isDraft} label="Địa điểm" onChange={(venue) => setForm({ ...form, venue })} value={form.venue} />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -250,7 +250,7 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
                 />
                 <button className="primary-button" disabled={saving || !seatMapFile} type="submit">
                   <FileUp className="h-4 w-4" />
-                  Upload
+                  Tải lên
                 </button>
               </form>
             )}
