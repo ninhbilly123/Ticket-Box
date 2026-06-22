@@ -48,6 +48,7 @@ async function createTicketTypes(concertId: string) {
       data: {
         concertId,
         name: item.name,
+        zoneCode: item.name,
         price: item.price,
         totalQuantity: item.totalQuantity,
         maxPerAccount: item.maxPerAccount,

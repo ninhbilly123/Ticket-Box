@@ -150,6 +150,7 @@ export class ConcertService {
             return {
               id: tt.id,
               name: tt.name,
+              zoneCode: tt.zoneCode,
               price: Number(tt.price),
               totalQuantity: tt.totalQuantity,
               maxLimitPerUser: tt.maxPerAccount,
@@ -167,7 +168,7 @@ export class ConcertService {
           artist: artistNames || 'Nhiều nghệ sĩ',
           dateTime: concert.startAt.toISOString(),
           location: concert.venue,
-          seatMapUrl: concert.svgSeatingMap || '',
+          seatMapEnabled: concert.seatMapEnabled,
           ticketTypes: ticketTypesWithRemaining,
         };
       })
@@ -255,10 +256,13 @@ export class ConcertService {
       status: concert.status,
       location: concert.venue,
       venue: concert.venue,
-      seatMapUrl: concert.svgSeatingMap || '',
+      seatMapEnabled: concert.seatMapEnabled,
+      seatMapSvg: concert.seatMapEnabled ? concert.svgSeatingMap : null,
+      seatMapUrl: '',
       ticketTypes: concert.ticketTypes.map((tt) => ({
         id: tt.id,
         name: tt.name,
+        zoneCode: tt.zoneCode,
         price: Number(tt.price),
         totalQuantity: tt.totalQuantity,
         maxLimitPerUser: tt.maxPerAccount,

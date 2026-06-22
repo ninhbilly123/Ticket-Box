@@ -343,6 +343,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
     setNotice(null);
     try {
       const updated = await adminApi.reviewArtistBio(token, artistBio.id, reviewedBio.trim());
+      if (!updated) throw new Error('Backend không trả về Artist Bio sau khi phê duyệt.');
       setArtistBio(updated);
       setReviewedBio(updated.reviewedBio || '');
       setNotice('Đã lưu và duyệt nội dung bio.');
@@ -361,6 +362,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
     setNotice(null);
     try {
       const updated = await adminApi.publishArtistBio(token, artistBio.id);
+      if (!updated) throw new Error('Backend không trả về Artist Bio sau khi publish.');
       setArtistBio(updated);
       setReviewedBio(updated.reviewedBio || '');
       setNotice('Bio đã được publish.');

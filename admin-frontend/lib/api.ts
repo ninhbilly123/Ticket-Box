@@ -48,6 +48,7 @@ export interface TicketType {
   id: string;
   concertId: string;
   name: string;
+  zoneCode: string;
   price: string | number;
   totalQuantity: number;
   maxPerAccount: number;
@@ -57,6 +58,14 @@ export interface TicketType {
   reservedQuantity: number;
   soldQuantity: number;
   inventory?: TicketInventory | null;
+}
+
+export interface Artist {
+  id: string;
+  name: string;
+  bioGenerated: string | null;
+  pdfSourceUrl: string | null;
+  bioUpdatedAt: string | null;
 }
 
 export interface Concert {
@@ -71,10 +80,27 @@ export interface Concert {
   saleOpenAt: string;
   status: string;
   description: string | null;
+  seatMapEnabled: boolean;
   svgSeatingMap: string | null;
   cancelledReason: string | null;
   cancelledAt: string | null;
   ticketTypes: TicketType[];
+  artists?: Array<{ artist: Artist }>;
+}
+
+export interface ConcertReadinessCheck {
+  key: string;
+  label: string;
+  status: 'PASS' | 'FAIL' | 'WARNING';
+  message: string;
+  blocking: boolean;
+}
+
+export interface ConcertReadiness {
+  concertId: string;
+  ready: boolean;
+  checks: ConcertReadinessCheck[];
+  blockingIssues: string[];
 }
 
 export type ArtistBioStatus =
@@ -354,6 +380,36 @@ export const adminApi = {
       token,
     });
   },
+  getConcertReadiness(token: string, id: string) {
+    return apiRequest<ConcertReadiness>(`/admin/concerts/${id}/readiness`, { token });
+  },
+  listConcertArtists(token: string, id: string) {
+    return apiRequest<Artist[]>(`/admin/concerts/${id}/artists`, { token });
+  },
+  addConcertArtist(token: string, id: string, name: string) {
+    return apiRequest<Artist>(`/admin/concerts/${id}/artists`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ name }),
+    });
+  },
+  removeConcertArtist(token: string, id: string, artistId: string) {
+    return apiRequest<{ deleted: boolean }>(`/admin/concerts/${id}/artists/${artistId}`, {
+      method: 'DELETE',
+      token,
+    });
+  },
+  uploadSeatMap(token: string, id: string, file: File) {
+    const body = new FormData();
+    body.append('file', file);
+    return apiMultipartRequest<{ concert: Concert; zoneCodes: string[] }>(`/admin/concerts/${id}/seat-map`, token, body);
+  },
+  deleteSeatMap(token: string, id: string) {
+    return apiRequest<Concert>(`/admin/concerts/${id}/seat-map`, {
+      method: 'DELETE',
+      token,
+    });
+  },
   cancelConcert(token: string, id: string, reason: string) {
     return apiRequest<Concert>(`/admin/concerts/${id}/cancel`, {
       method: 'POST',
@@ -438,6 +494,12 @@ export const adminApi = {
       method: 'POST',
       token,
       body: JSON.stringify(payload),
+    });
+  },
+  deleteTicketType(token: string, id: string) {
+    return apiRequest<{ deleted: boolean }>(`/admin/ticket-types/${id}`, {
+      method: 'DELETE',
+      token,
     });
   },
   getLatestArtistBio(token: string, concertId: string) {

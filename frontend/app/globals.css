@@ -1,3 +1,25 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.seat-map-svg [data-zone-code] {
+  cursor: pointer;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.seat-map-svg [data-zone-code]:hover,
+.seat-map-svg [data-zone-code]:focus-visible {
+  filter: brightness(1.16);
+  outline: 2px solid #67e8f9;
+  outline-offset: 2px;
+}
+
+.seat-map-svg [data-zone-state='selected'] {
+  filter: brightness(1.22) drop-shadow(0 0 5px rgb(103 232 249 / 0.8));
+}
+
+.seat-map-svg [data-zone-state='sold-out'] {
+  cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.35;
+}

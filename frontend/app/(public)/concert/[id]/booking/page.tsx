@@ -394,6 +394,8 @@ export default function ConcertDetailPage() {
           </div>
 
           <SeatMap
+            seatMapEnabled={Boolean(concert.seatMapEnabled)}
+            seatMapSvg={concert.seatMapSvg || null}
             ticketTypes={concert.ticketTypes}
             selectedTicketTypeId={selectedTicketTypeId}
             onSelectTicketType={(ticketTypeId) => {

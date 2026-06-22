@@ -79,7 +79,7 @@ export class ArtistBioService {
       );
     }
 
-    const publishedBio = await prisma.artistBio.update({
+    const reviewedArtistBio = await prisma.artistBio.update({
       where: { id: artistBioId },
       data: {
         reviewedBio: reviewedBio.trim(),
@@ -87,6 +87,8 @@ export class ArtistBioService {
         status: 'APPROVED',
       },
     });
+
+    return reviewedArtistBio;
   }
 
   public async publishBio(artistBioId: string) {

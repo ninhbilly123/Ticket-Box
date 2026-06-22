@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Shield,
   Ticket,
+  Trash2,
   Users,
 } from 'lucide-react';
 import {
@@ -30,6 +31,7 @@ import {
 } from '../lib/api';
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
 import CheckinWorkspace from '../components/checkin-workspace';
+import ConcertSetup from '../components/concert-setup';
 
 type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 
@@ -54,12 +56,13 @@ const emptyConcertForm = {
   startAt: '',
   saleOpenAt: '',
   description: '',
-  svgSeatingMap: '',
+  seatMapEnabled: false,
   organizationId: '',
 };
 
 const emptyTicketTypeForm = {
   name: 'VIP',
+  zoneCode: 'VIP',
   price: '1000000',
   totalQuantity: '100',
   maxPerAccount: '4',
@@ -435,7 +438,8 @@ export default function AdminHomePage() {
 
     if (activeTab === 'concerts') {
       return (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
           <Panel title="Concerts">
             <div className="overflow-x-auto">
               <table className="admin-table">
@@ -462,21 +466,14 @@ export default function AdminHomePage() {
                       <td>
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => setSelectedConcertId(concert.id)} className="small-button" type="button">
-                            Select
-                          </button>
-                          <button
-                            onClick={() => runMutation(() => adminApi.publishConcert(token, concert.id), 'Concert published.')}
-                            className="small-button"
-                            type="button"
-                          >
-                            Publish
+                            Cấu hình
                           </button>
                           <button
                             onClick={() => runMutation(() => adminApi.cancelConcert(token, concert.id, cancelReason), 'Concert cancelled.')}
                             className="danger-small-button"
                             type="button"
                           >
-                            Cancel
+                            Hủy
                           </button>
                         </div>
                       </td>
@@ -499,16 +496,18 @@ export default function AdminHomePage() {
                 setConcertFormError(null);
                 void runMutation(
                   async () => {
-                    await adminApi.createConcert(token, {
+                    const created = await adminApi.createConcert(token, {
                       ...concertForm,
                       eventCode,
+                      startAt: new Date(concertForm.startAt).toISOString(),
+                      saleOpenAt: new Date(concertForm.saleOpenAt).toISOString(),
                       organizationId: concertForm.organizationId || undefined,
-                      svgSeatingMap: concertForm.svgSeatingMap || undefined,
                       description: concertForm.description || undefined,
                     });
+                    setSelectedConcertId(created.id);
                     setConcertForm(emptyConcertForm);
                   },
-                  'Concert created.'
+                  'Đã tạo concert ở trạng thái DRAFT.'
                 );
               }}
             >
@@ -521,21 +520,37 @@ export default function AdminHomePage() {
                     if (concertFormError) setConcertFormError(null);
                   }}
                   placeholder="SKYTOUR-2026-HN"
+                  required
                   value={concertForm.eventCode}
                 />
                 {concertFormError && <span className="text-xs font-medium text-rose-700">{concertFormError}</span>}
               </Field>
-              <TextInput label="Name" value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
-              <TextInput label="Venue" value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
-              <TextInput label="Start at" type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
-              <TextInput label="Sale open" type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
+              <TextInput label="Name" required value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
+              <TextInput label="Venue" required value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
+              <TextInput label="Start at" required type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
+              <TextInput label="Sale open" required type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
               <TextInput label="Description" value={concertForm.description} onChange={(value) => setConcertForm({ ...concertForm, description: value })} />
+              <label className="flex items-center justify-between rounded border border-slate-200 px-3 py-2.5">
+                <span className="text-sm font-medium">Sử dụng sơ đồ khu vực</span>
+                <input
+                  checked={concertForm.seatMapEnabled}
+                  className="h-4 w-4 accent-cyan-700"
+                  onChange={(event) => setConcertForm({ ...concertForm, seatMapEnabled: event.target.checked })}
+                  type="checkbox"
+                />
+              </label>
               <button disabled={saving} className="primary-button w-full" type="submit">
                 <Check className="h-4 w-4" />
                 Create concert
               </button>
             </form>
           </Panel>
+          </div>
+          {selectedConcert && (
+            <Panel title="Cấu hình và publish">
+              <ConcertSetup concert={selectedConcert} runMutation={runMutation} saving={saving} token={token} />
+            </Panel>
+          )}
         </div>
       );
     }
@@ -549,18 +564,21 @@ export default function AdminHomePage() {
                 <thead>
                   <tr>
                     <th>Name</th>
+                    <th>Zone</th>
                     <th>Price</th>
                     <th>Total</th>
                     <th>Available</th>
                     <th>Sold</th>
                     <th>Max/user</th>
                     <th>Update total</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {ticketTypes.map((item) => (
                     <tr key={item.id}>
                       <td className="font-medium">{item.name}</td>
+                      <td><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold">{item.zoneCode}</span></td>
                       <td>{formatMoney(item.price)}</td>
                       <td>{item.inventory?.totalQuantity ?? item.totalQuantity}</td>
                       <td>{item.inventory?.availableQuantity ?? '-'}</td>
@@ -588,6 +606,18 @@ export default function AdminHomePage() {
                           </button>
                         </div>
                       </td>
+                      <td>
+                        {selectedConcert?.status === 'DRAFT' && (
+                          <button
+                            className="icon-button"
+                            onClick={() => runMutation(() => adminApi.deleteTicketType(token, item.id), 'Đã xóa loại vé.')}
+                            title="Xóa loại vé"
+                            type="button"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -601,24 +631,31 @@ export default function AdminHomePage() {
                 event.preventDefault();
                 if (!selectedConcert) return;
                 void runMutation(
-                  () =>
-                    adminApi.createTicketType(token, selectedConcert.id, {
+                  async () => {
+                    await adminApi.createTicketType(token, selectedConcert.id, {
                       name: ticketTypeForm.name,
+                      zoneCode: ticketTypeForm.zoneCode.trim().toUpperCase(),
                       price: Number(ticketTypeForm.price),
                       totalQuantity: Number(ticketTypeForm.totalQuantity),
                       maxPerAccount: Number(ticketTypeForm.maxPerAccount),
-                      saleOpenAt: ticketTypeForm.saleOpenAt || undefined,
-                      saleCloseAt: ticketTypeForm.saleCloseAt || undefined,
-                    }),
-                  'Ticket type created.'
+                      saleOpenAt: ticketTypeForm.saleOpenAt ? new Date(ticketTypeForm.saleOpenAt).toISOString() : undefined,
+                      saleCloseAt: ticketTypeForm.saleCloseAt ? new Date(ticketTypeForm.saleCloseAt).toISOString() : undefined,
+                    });
+                    setTicketTypeForm(emptyTicketTypeForm);
+                  },
+                  'Đã tạo loại vé và tồn kho.'
                 );
               }}
             >
-              <TextInput label="Name" value={ticketTypeForm.name} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, name: value })} />
-              <TextInput label="Price" type="number" value={ticketTypeForm.price} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, price: value })} />
-              <TextInput label="Total quantity" type="number" value={ticketTypeForm.totalQuantity} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, totalQuantity: value })} />
-              <TextInput label="Max per user" type="number" value={ticketTypeForm.maxPerAccount} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, maxPerAccount: value })} />
-              <button disabled={saving || !selectedConcert} className="primary-button w-full" type="submit">
+              <TextInput label="Name" required value={ticketTypeForm.name} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, name: value })} />
+              <TextInput label="Zone code" required value={ticketTypeForm.zoneCode} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, zoneCode: value.toUpperCase() })} />
+              <TextInput label="Price" required type="number" value={ticketTypeForm.price} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, price: value })} />
+              <TextInput label="Total quantity" required type="number" value={ticketTypeForm.totalQuantity} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, totalQuantity: value })} />
+              <TextInput label="Max per user" required type="number" value={ticketTypeForm.maxPerAccount} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, maxPerAccount: value })} />
+              <TextInput label="Sale open (optional)" type="datetime-local" value={ticketTypeForm.saleOpenAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleOpenAt: value })} />
+              <TextInput label="Sale close (optional)" type="datetime-local" value={ticketTypeForm.saleCloseAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleCloseAt: value })} />
+              {selectedConcert?.status !== 'DRAFT' && <p className="text-sm text-amber-700">Cấu hình loại vé đã khóa sau publish.</p>}
+              <button disabled={saving || !selectedConcert || selectedConcert.status !== 'DRAFT'} className="primary-button w-full" type="submit">
                 <Ticket className="h-4 w-4" />
                 Create type
               </button>
@@ -871,15 +908,17 @@ function TextInput({
   value,
   onChange,
   type = 'text',
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  required?: boolean;
 }) {
   return (
     <Field label={label}>
-      <input value={value} onChange={(event) => onChange(event.target.value)} className="input" type={type} />
+      <input value={value} onChange={(event) => onChange(event.target.value)} className="input" required={required} type={type} />
     </Field>
   );
 }

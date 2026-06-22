@@ -12,6 +12,7 @@ const API_BASE_URL = getApiBaseUrl();
 export interface TicketType {
   id: string;
   name: string;
+  zoneCode: string;
   price: number;
   totalQuantity: number;
   maxLimitPerUser: number;
@@ -29,7 +30,9 @@ export interface Concert {
   startAt?: string;
   location: string;
   venue?: string;
-  seatMapUrl: string;
+  seatMapEnabled?: boolean;
+  seatMapSvg?: string | null;
+  seatMapUrl?: string;
   ticketTypes: TicketType[];
 }
 

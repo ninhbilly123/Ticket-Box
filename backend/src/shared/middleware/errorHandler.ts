@@ -37,6 +37,18 @@ export function errorHandler(
     });
   }
 
+  if (err.name === 'MulterError') {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'UPLOAD_INVALID',
+        message: 'File upload không hợp lệ hoặc vượt quá giới hạn kích thước.',
+        timestamp: new Date().toISOString(),
+        path: req.originalUrl,
+      },
+    });
+  }
+
   if (err instanceof AppError) {
     const timestamp = new Date().toISOString();
     return res.status(err.statusCode).json({
