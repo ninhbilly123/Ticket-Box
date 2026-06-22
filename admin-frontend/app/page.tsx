@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   BadgeCheck,
   BarChart3,
+  BrainCircuit,
+  Building2,
   CalendarClock,
   Check,
   ClipboardList,
@@ -26,8 +28,9 @@ import {
   adminApi,
   formatMoney,
 } from '../lib/api';
+import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
 
-type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'revenue';
+type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 
 const SESSION_KEY = 'ticketbox_admin_session';
 
@@ -37,10 +40,14 @@ const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'tickets', label: 'Ticket Types', icon: Ticket },
   { key: 'staff', label: 'Staff', icon: Users },
   { key: 'whitelist', label: 'Whitelist', icon: MailCheck },
+  { key: 'sponsors', label: 'Email nhãn hàng', icon: Building2 },
+  { key: 'ai-bio', label: 'AI Artist Bio', icon: BrainCircuit },
+  { key: 'vip-sync', label: 'VIP Sync', icon: RefreshCw },
   { key: 'revenue', label: 'Revenue', icon: ClipboardList },
 ];
 
 const emptyConcertForm = {
+  eventCode: '',
   name: '',
   venue: '',
   startAt: '',
@@ -92,6 +99,7 @@ export default function AdminHomePage() {
 
   const [loginForm, setLoginForm] = useState({ email: 'organizer@example.com', password: 'Password123!' });
   const [concertForm, setConcertForm] = useState(emptyConcertForm);
+  const [concertFormError, setConcertFormError] = useState<string | null>(null);
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);
   const [staffForm, setStaffForm] = useState({ staffId: '', gateId: 'GATE-A' });
   const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
@@ -304,7 +312,7 @@ export default function AdminHomePage() {
   return (
     <main className="min-h-screen bg-[#eef3f8] text-slate-900">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_1fr]">
-        <aside className="border-r border-slate-200 bg-white">
+        <aside className="border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
           <div className="border-b border-slate-200 p-5">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-950 text-cyan-300">
@@ -316,7 +324,7 @@ export default function AdminHomePage() {
               </div>
             </div>
           </div>
-          <nav className="space-y-1 p-3">
+          <nav className="flex gap-1 overflow-x-auto p-3 lg:block lg:space-y-1">
             {tabs
               .map((tab) => {
                 const Icon = tab.icon;
@@ -324,7 +332,7 @@ export default function AdminHomePage() {
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key)}
-                    className={`nav-button ${activeTab === tab.key ? 'nav-button-active' : ''}`}
+                    className={`nav-button min-w-max lg:w-full ${activeTab === tab.key ? 'nav-button-active' : ''}`}
                     type="button"
                   >
                     <Icon className="h-4 w-4" />
@@ -346,11 +354,11 @@ export default function AdminHomePage() {
                 <select
                   value={selectedConcert?.id || ''}
                   onChange={(event) => setSelectedConcertId(event.target.value)}
-                  className="select min-w-[260px]"
+                  className="select min-w-0 flex-1 sm:min-w-[260px] sm:flex-none"
                 >
                   {concerts.map((concert) => (
                     <option key={concert.id} value={concert.id}>
-                      {concert.name}
+                      {concert.eventCode} · {concert.name}
                     </option>
                   ))}
                 </select>
@@ -391,8 +399,9 @@ export default function AdminHomePage() {
           </div>
           <Panel title="Current concert">
             {selectedConcert ? (
-              <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-5">
                 <Info label="Name" value={selectedConcert.name} />
+                <Info label="Event code" value={selectedConcert.eventCode} />
                 <Info label="Status" value={selectedConcert.status} />
                 <Info label="Venue" value={selectedConcert.venue} />
                 <Info label="Start" value={formatDate(selectedConcert.startAt)} />
@@ -426,6 +435,7 @@ export default function AdminHomePage() {
               <table className="admin-table">
                 <thead>
                   <tr>
+                    <th>Event code</th>
                     <th>Name</th>
                     <th>Status</th>
                     <th>Venue</th>
@@ -436,6 +446,7 @@ export default function AdminHomePage() {
                 <tbody>
                   {concerts.map((concert) => (
                     <tr key={concert.id} className={concert.id === selectedConcert?.id ? 'bg-cyan-50' : ''}>
+                      <td><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{concert.eventCode}</span></td>
                       <td className="font-medium">{concert.name}</td>
                       <td>
                         <StatusBadge status={concert.status} />
@@ -474,18 +485,40 @@ export default function AdminHomePage() {
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
+                const eventCode = concertForm.eventCode.trim().toUpperCase();
+                if (!eventCode) {
+                  setConcertFormError('Mã sự kiện là bắt buộc.');
+                  return;
+                }
+                setConcertFormError(null);
                 void runMutation(
-                  () =>
-                    adminApi.createConcert(token, {
+                  async () => {
+                    await adminApi.createConcert(token, {
                       ...concertForm,
+                      eventCode,
                       organizationId: concertForm.organizationId || undefined,
                       svgSeatingMap: concertForm.svgSeatingMap || undefined,
                       description: concertForm.description || undefined,
-                    }),
+                    });
+                    setConcertForm(emptyConcertForm);
+                  },
                   'Concert created.'
                 );
               }}
             >
+              <Field label="Event code">
+                <input
+                  aria-invalid={Boolean(concertFormError)}
+                  className={`input uppercase ${concertFormError ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-100' : ''}`}
+                  onChange={(event) => {
+                    setConcertForm({ ...concertForm, eventCode: event.target.value.toUpperCase() });
+                    if (concertFormError) setConcertFormError(null);
+                  }}
+                  placeholder="SKYTOUR-2026-HN"
+                  value={concertForm.eventCode}
+                />
+                {concertFormError && <span className="text-xs font-medium text-rose-700">{concertFormError}</span>}
+              </Field>
               <TextInput label="Name" value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
               <TextInput label="Venue" value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
               <TextInput label="Start at" type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
@@ -737,6 +770,25 @@ export default function AdminHomePage() {
           </Panel>
         </div>
       );
+    }
+
+    if (activeTab === 'sponsors') {
+      return <SponsorEmailTab token={token} concerts={concerts} />;
+    }
+
+    if (activeTab === 'ai-bio') {
+      return (
+        <ArtistBioTab
+          token={token}
+          concerts={concerts}
+          selectedConcertId={selectedConcert?.id || ''}
+          onSelectConcert={setSelectedConcertId}
+        />
+      );
+    }
+
+    if (activeTab === 'vip-sync') {
+      return <VipSyncTab token={token} concerts={concerts} />;
     }
 
     if (activeTab === 'revenue') {

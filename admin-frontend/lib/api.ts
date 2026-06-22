@@ -61,6 +61,7 @@ export interface TicketType {
 
 export interface Concert {
   id: string;
+  eventCode: string;
   organizerId: string;
   organizationId: string | null;
   organization?: Organization | null;
@@ -74,6 +75,98 @@ export interface Concert {
   cancelledReason: string | null;
   cancelledAt: string | null;
   ticketTypes: TicketType[];
+}
+
+export type ArtistBioStatus =
+  | 'UPLOADED'
+  | 'PROCESSING'
+  | 'AI_GENERATED'
+  | 'APPROVED'
+  | 'PUBLISHED'
+  | 'FAILED';
+
+export interface ArtistBio {
+  id: string;
+  concertId: string;
+  sourcePdfObjectKey: string;
+  sourcePdfFileName: string | null;
+  status: ArtistBioStatus;
+  rawText: string | null;
+  cleanedText: string | null;
+  generatedBio: string | null;
+  reviewedBio: string | null;
+  publishedBio: string | null;
+  errorMessage: string | null;
+  createdBy: string | null;
+  reviewedBy: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SponsorEmail {
+  id: string;
+  email: string;
+  displayName: string | null;
+  isActive: boolean;
+  allowedEventCodes: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GuestImportStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'PARTIAL_SUCCESS'
+  | 'FAILED'
+  | 'NO_FILE';
+
+export interface GuestImportRowError {
+  id: string;
+  guestImportJobId: string;
+  rowNumber: number;
+  rawData: Record<string, unknown> | null;
+  errorCode: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface VipGuest {
+  id: string;
+  concertId: string;
+  fullName: string;
+  identifier: string | null;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  note: string | null;
+  ticketStatus: 'VALID' | 'USED' | 'CANCELLED';
+  emailStatus: 'PENDING' | 'QUEUED' | 'SENT' | 'FAILED' | 'SKIPPED';
+  emailError: string | null;
+  checkedInAt: string | null;
+}
+
+export interface GuestImportReport {
+  id: string;
+  concertId: string | null;
+  status: GuestImportStatus;
+  senderEmail: string | null;
+  mailboxMessageId: string | null;
+  originalFileName: string | null;
+  objectKey: string | null;
+  totalRows: number;
+  successRows: number;
+  duplicateRows: number;
+  errorRows: number;
+  emailSentRows: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  rowErrors: GuestImportRowError[];
+  vipGuests?: VipGuest[];
 }
 
 export interface StaffAssignment {
@@ -157,6 +250,15 @@ export async function apiRequest<T>(
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
+  });
+  return parseResponse<T>(response);
+}
+
+async function apiMultipartRequest<T>(path: string, token: string, body: FormData): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body,
   });
   return parseResponse<T>(response);
 }
@@ -288,6 +390,57 @@ export const adminApi = {
       token,
       body: JSON.stringify(payload),
     });
+  },
+  getLatestArtistBio(token: string, concertId: string) {
+    return apiRequest<ArtistBio | null>(`/ai/artist-bio/concerts/${concertId}`, { token });
+  },
+  uploadArtistBio(token: string, concertId: string, file: File) {
+    const body = new FormData();
+    body.append('file', file);
+    return apiMultipartRequest<ArtistBio>(`/ai/artist-bio/concerts/${concertId}/upload`, token, body);
+  },
+  reviewArtistBio(token: string, id: string, reviewedBio: string) {
+    return apiRequest<ArtistBio>(`/ai/artist-bio/${id}/review`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ reviewedBio }),
+    });
+  },
+  publishArtistBio(token: string, id: string) {
+    return apiRequest<ArtistBio>(`/ai/artist-bio/${id}/publish`, {
+      method: 'POST',
+      token,
+    });
+  },
+  listSponsorEmails(token: string) {
+    return apiRequest<SponsorEmail[]>('/vip-guest-sync/sponsors', { token });
+  },
+  createSponsorEmail(
+    token: string,
+    payload: { email: string; displayName?: string; allowedEventCodes: string[] }
+  ) {
+    return apiRequest<SponsorEmail>('/vip-guest-sync/sponsors', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(payload),
+    });
+  },
+  updateSponsorEmail(
+    token: string,
+    id: string,
+    payload: { displayName?: string; isActive?: boolean; allowedEventCodes?: string[] }
+  ) {
+    return apiRequest<SponsorEmail>(`/vip-guest-sync/sponsors/${id}`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify(payload),
+    });
+  },
+  listGuestImportReports(token: string) {
+    return apiRequest<GuestImportReport[]>('/vip-guest-sync/import-reports', { token });
+  },
+  getGuestImportReport(token: string, id: string) {
+    return apiRequest<GuestImportReport>(`/vip-guest-sync/import-reports/${id}`, { token });
   },
 };
 

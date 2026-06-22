@@ -24,6 +24,7 @@ export interface Concert {
   name?: string;
   description: string | null;
   artist: string;
+  artistBio: string | null;
   dateTime: string;
   startAt?: string;
   location: string;
