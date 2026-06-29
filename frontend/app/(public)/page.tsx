@@ -175,8 +175,10 @@ export default function ConcertListingPage() {
               const totalRemaining = concert.ticketTypes.reduce((sum, tt) => sum + tt.remaining, 0);
 
               return (
-                <div
+                <Link
                   key={concert.id}
+                  href={`/concert/${concert.id}`}
+                  aria-label={`Xem thông tin chi tiết ${concert.title}`}
                   className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden hover:border-indigo-500/50 hover:shadow-xl hover:shadow-indigo-950/20 transition-all duration-300 flex flex-col h-full group"
                 >
                   {/* Decorative Banner/Card image replacement */}
@@ -245,15 +247,14 @@ export default function ConcertListingPage() {
                         ))}
                       </div>
 
-                      <Link
-                        href={`/concert/${concert.id}`}
-                        className="block w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-xl text-xs transition-colors shadow-md hover:shadow-lg"
+                      <span
+                        className="block w-full text-center bg-indigo-600 group-hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-xl text-xs transition-colors shadow-md group-hover:shadow-lg"
                       >
-                        Xem sơ đồ & Đặt vé
-                      </Link>
+                        Xem thông tin chi tiết
+                      </span>
                     </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
