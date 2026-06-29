@@ -30,7 +30,6 @@ import {
   formatMoney,
 } from '../lib/api';
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
-import CheckinWorkspace from '../components/checkin-workspace';
 import ConcertSetup from '../components/concert-setup';
 import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
@@ -300,7 +299,40 @@ export default function AdminHomePage() {
   }
 
   if (session.user.role === 'CHECKIN_STAFF') {
-    return <CheckinWorkspace session={session} onLogout={() => void handleLogout()} />;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#eef3f8] p-6 text-slate-900">
+        <section className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Nhân viên soát vé</p>
+              <h1 className="mt-3 text-2xl font-semibold">Vui lòng dùng TicketBox Scanner App</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Admin web chỉ dùng để quản lý và theo dõi vận hành. Việc quét QR tại cổng đã được tách sang ứng dụng
+                mobile để dùng camera điện thoại, lưu offline và đồng bộ lại khi có mạng.
+              </p>
+            </div>
+            <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-950 text-cyan-300">
+              <Ticket className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+            <p className="font-semibold text-slate-900">Cách chạy khi demo:</p>
+            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">cd scanner-app</code>
+            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">npm start</code>
+            <p>
+              Sau đó mở Expo Go trên điện thoại và nhập API URL dạng{' '}
+              <span className="font-mono text-xs">http://IP-LAPTOP:3000/api/v1</span>.
+            </p>
+          </div>
+
+          <button onClick={handleLogout} className="secondary-button mt-6 w-full" type="button">
+            <LogOut className="h-4 w-4" />
+            Đăng xuất
+          </button>
+        </section>
+      </main>
+    );
   }
 
   if (!isOrganizer) {
