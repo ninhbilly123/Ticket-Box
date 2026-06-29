@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { TicketService } from './ticket.service';
+import { authorizationService } from '../rbac/authorization.service';
+import { AppError } from '../../shared/lib/errors';
 
 const ticketService = new TicketService();
 
@@ -36,7 +38,16 @@ export class TicketController {
 
   public async getOrder(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user) {
+        throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
+      }
+
       const { id } = req.params;
+      const canView = await authorizationService.canViewOrder(req.user, id);
+      if (!canView) {
+        throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen xem don hang nay.');
+      }
+
       const order = await ticketService.getOrderById(id);
 
       return res.status(200).json({

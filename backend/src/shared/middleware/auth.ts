@@ -5,7 +5,15 @@ import { AppError } from '../lib/errors';
 import { JwtPayload } from '../types/auth';
 import { normalizeRole } from '../../modules/rbac/roles';
 
-const jwtSecret = process.env.JWT_SECRET || 'ticketbox-dev-access-secret';
+function getRequiredJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is required. Add JWT_SECRET to backend/.env before starting the server.');
+  }
+  return secret;
+}
+
+const jwtSecret = getRequiredJwtSecret();
 
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
   try {

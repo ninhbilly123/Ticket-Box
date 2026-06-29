@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import { prisma } from '../../shared/lib/prisma';
-import redisClient from '../../shared/lib/redis';
+import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
@@ -53,10 +53,10 @@ export class PaymentService {
    * Helper to check Circuit Breaker state on Redis
    */
   public async checkCircuitBreaker(gateway: string): Promise<void> {
-    if (!redisClient.isOpen) return; // Pass through if Redis is unavailable
+    if (!isRedisReady()) return; // Pass through if Redis is unavailable
 
     const stateKey = `circuit_breaker:${gateway}:state`;
-    const state = await redisClient.get(stateKey);
+    const state = await runRedisOperation(() => redisClient.get(stateKey));
 
     if (state === 'OPEN') {
       throw new AppError(
@@ -71,24 +71,24 @@ export class PaymentService {
    * Helper to record API call failure (tripping the Circuit Breaker)
    */
   public async recordFailure(gateway: string): Promise<void> {
-    if (!redisClient.isOpen) return;
+    if (!isRedisReady()) return;
 
     const failureKey = `circuit_breaker:${gateway}:failures`;
     const stateKey = `circuit_breaker:${gateway}:state`;
 
     // Increment failure counter
-    const failures = await redisClient.incr(failureKey);
+    const failures = await runRedisOperation(() => redisClient.incr(failureKey));
     // Set expiry for failure count if not already set (e.g. 5 minutes window)
-    await redisClient.expire(failureKey, 300);
+    await runRedisOperation(() => redisClient.expire(failureKey, 300));
 
     console.log(`[Circuit Breaker] Gateway ${gateway} failure count: ${failures}/5`);
 
     if (failures >= 5) {
       console.warn(`[Circuit Breaker] Tripping breaker for gateway ${gateway}! State set to OPEN.`);
       // Set state to OPEN with 60 seconds TTL (cool-down period)
-      await redisClient.setEx(stateKey, 60, 'OPEN');
+      await runRedisOperation(() => redisClient.setEx(stateKey, 60, 'OPEN'));
       // Reset failures
-      await redisClient.del(failureKey);
+      await runRedisOperation(() => redisClient.del(failureKey));
     }
   }
 
@@ -96,13 +96,13 @@ export class PaymentService {
    * Helper to record API call success (closing/resetting the Circuit Breaker)
    */
   public async recordSuccess(gateway: string): Promise<void> {
-    if (!redisClient.isOpen) return;
+    if (!isRedisReady()) return;
 
     const failureKey = `circuit_breaker:${gateway}:failures`;
     const stateKey = `circuit_breaker:${gateway}:state`;
 
-    await redisClient.del(failureKey);
-    await redisClient.del(stateKey);
+    await runRedisOperation(() => redisClient.del(failureKey));
+    await runRedisOperation(() => redisClient.del(stateKey));
     console.log(`[Circuit Breaker] Gateway ${gateway} status reset to CLOSED (Healthy).`);
   }
 
@@ -114,8 +114,9 @@ export class PaymentService {
     gateway: 'vnpay' | 'momo';
     returnUrl: string;
     ipAddr: string;
+    userId: string;
   }) {
-    const { orderId, gateway, returnUrl, ipAddr } = params;
+    const { orderId, gateway, returnUrl, ipAddr, userId } = params;
 
     // 1. Check Circuit Breaker before proceeding
     await this.checkCircuitBreaker(gateway);
@@ -132,12 +133,24 @@ export class PaymentService {
       throw new AppError(404, 'ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng yêu cầu.');
     }
 
+    if (order.userId !== userId) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen thanh toan don hang nay.');
+    }
+
     if (!['pending', 'PENDING'].includes(order.status)) {
       throw new AppError(400, 'INVALID_ORDER_STATUS', 'Đơn hàng không ở trạng thái chờ thanh toán.');
     }
 
+    const tmnCode = process.env.VNPAY_TMN_CODE;
+    const secretKey = process.env.VNPAY_HASH_SECRET;
+    const vnpUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
+
+    if (!tmnCode || !secretKey) {
+      throw new AppError(500, 'CONFIG_ERROR', 'Chua cau hinh VNPAY_TMN_CODE hoac VNPAY_HASH_SECRET trong file .env');
+    }
+
     // Simulate VNPAY connection timeout check (Circuit Breaker demo)
-    const simulateFailure = Math.random() < 0.05; // 5% failure simulation rate
+    const simulateFailure = process.env.SIMULATE_PAYMENT_GATEWAY_FAILURE === 'true' && Math.random() < 0.05;
     if (simulateFailure) {
       await this.recordFailure(gateway);
       throw new AppError(504, 'GATEWAY_TIMEOUT', `Không thể kết nối đến máy chủ cổng thanh toán ${gateway.toUpperCase()}.`);
@@ -157,14 +170,6 @@ export class PaymentService {
     });
 
     // 3. Generate VNPAY sandbox payment URL
-    const tmnCode = process.env.VNPAY_TMN_CODE;
-    const secretKey = process.env.VNPAY_HASH_SECRET;
-    const vnpUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
-
-    if (!tmnCode || !secretKey) {
-      throw new AppError(500, 'CONFIG_ERROR', 'Chưa cấu hình VNPAY_TMN_CODE hoặc VNPAY_HASH_SECRET trong file .env');
-    }
-
     const vnpParams: Record<string, string> = {
       vnp_Version: '2.1.0',
       vnp_Command: 'pay',
@@ -402,7 +407,6 @@ export class PaymentService {
 
         // Issue tickets after payment succeeds. Hold-order flow does not create QR before payment.
         for (const item of order.orderItems) {
-          const ticketZone = item.ticketType.name.replace(/\s+/g, '').toUpperCase();
           const existingTickets = item.tickets;
 
           for (let i = 0; i < existingTickets.length; i++) {
@@ -411,7 +415,6 @@ export class PaymentService {
               where: { id: ticket.id },
               data: {
                 status: 'valid',
-                seatNumber: ticket.seatNumber || `${ticketZone}-${String(i + 1).padStart(3, '0')}`,
               },
             });
           }
@@ -424,7 +427,6 @@ export class PaymentService {
                 userId: order.userId,
                 qrCode: `TICKET-${order.id.slice(0, 8)}-${crypto.randomUUID()}`,
                 status: 'valid',
-                seatNumber: `${ticketZone}-${String(existingTickets.length + i + 1).padStart(3, '0')}`,
               },
             });
           }
@@ -513,8 +515,8 @@ export class PaymentService {
       for (const ttId of ticketTypeIds) {
         const cacheKey = `ticket_inventory:${ttId}`;
         try {
-          if (redisClient.isOpen) {
-            await redisClient.del(cacheKey);
+          if (isRedisReady()) {
+            await runRedisOperation(() => redisClient.del(cacheKey));
           }
         } catch (err) {
           console.error(`[Redis Invalidation Error] Failed to delete key ${cacheKey}:`, err);

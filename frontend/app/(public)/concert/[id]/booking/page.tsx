@@ -283,9 +283,11 @@ export default function ConcertDetailPage() {
     setHoldError(null);
 
     try {
+      const activeSession = await getSessionForCheckout();
       const payment = await initiatePayment({
         orderId: holdResult.orderId,
         gateway: 'vnpay',
+        accessToken: activeSession.accessToken,
         idempotencyKey: `pay-${holdResult.orderId}`,
       });
       setPaymentUrl(payment.paymentUrl);
@@ -304,7 +306,8 @@ export default function ConcertDetailPage() {
     setHoldError(null);
 
     try {
-      const updatedOrder = await fetchOrderById(holdResult.orderId);
+      const activeSession = await getSessionForCheckout();
+      const updatedOrder = await fetchOrderById(holdResult.orderId, activeSession.accessToken);
       setOrderSnapshot(updatedOrder);
       await loadConcert(false);
       await loadHistory();

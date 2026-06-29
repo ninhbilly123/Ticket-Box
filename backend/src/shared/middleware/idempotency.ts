@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import redisClient from '../lib/redis';
-import { AppError } from '../lib/errors';
+import redisClient, { isRedisReady, runRedisOperation } from '../lib/redis';
 
 /**
  * Middleware to enforce idempotency on POST/PUT requests using an Idempotency-Key header.
@@ -21,12 +20,12 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
   const redisKey = `idempotency:${idempotencyKey}`;
 
   try {
-    if (!redisClient.isOpen) {
+    if (!isRedisReady()) {
       // If Redis is down, fallback to normal execution
       return next();
     }
 
-    const cachedStatus = await redisClient.get(redisKey);
+    const cachedStatus = await runRedisOperation(() => redisClient.get(redisKey));
 
     if (cachedStatus) {
       if (cachedStatus === 'PROCESSING') {
@@ -46,8 +45,19 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       return res.status(cachedResponse.status).json(cachedResponse.body);
     }
 
-    // Set lock status in Redis with a 120 seconds TTL
-    await redisClient.setEx(redisKey, 120, 'PROCESSING');
+    // Set lock status atomically so concurrent requests with the same key cannot both proceed.
+    const lockResult = await runRedisOperation(() =>
+      redisClient.set(redisKey, 'PROCESSING', { EX: 120, NX: true })
+    );
+    if (lockResult !== 'OK') {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'IDEMPOTENCY_CONFLICT',
+          message: 'Yêu cầu trùng lặp đang được xử lý, vui lòng thử lại sau ít phút.',
+        },
+      });
+    }
 
     // Override res.json to capture and cache the response when it finishes
     const originalJson = res.json;
@@ -60,7 +70,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
         body,
       });
 
-      redisClient.setEx(redisKey, 86400, cacheValue).catch((err) => {
+      runRedisOperation(() => redisClient.setEx(redisKey, 86400, cacheValue)).catch((err) => {
         console.error(`[Redis Idempotency Write Error] Failed to cache response for ${idempotencyKey}:`, err);
       });
 

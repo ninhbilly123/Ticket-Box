@@ -16,6 +16,8 @@ model Organization {
   users                 User[]
   concerts              Concert[]
   whitelistEmailConfigs WhitelistEmailConfig[]
+  sponsorEmails         SponsorEmail[]
+  guestImportJobs       GuestImportJob[]
 
   @@map("organizations")
 }
@@ -289,14 +291,17 @@ enum ArtistBioStatus {
 }
 
 model SponsorEmail {
-  id                String   @id @default(uuid()) @db.Uuid
-  email             String   @unique
-  displayName       String?  @map("display_name")
-  isActive          Boolean  @default(true) @map("is_active")
-  allowedEventCodes String[] @default([]) @map("allowed_event_codes")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                String        @id @default(uuid()) @db.Uuid
+  email             String        @unique
+  organizationId    String?       @map("organization_id") @db.Uuid
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  displayName       String?       @map("display_name")
+  isActive          Boolean       @default(true) @map("is_active")
+  allowedEventCodes String[]      @default([]) @map("allowed_event_codes")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
+  @@index([organizationId])
   @@map("sponsor_emails")
 }
 
@@ -304,6 +309,8 @@ model GuestImportJob {
   id               String                @id @default(uuid()) @db.Uuid
   concertId        String?               @map("concert_id") @db.Uuid
   concert          Concert?              @relation(fields: [concertId], references: [id], onDelete: SetNull)
+  organizationId   String?               @map("organization_id") @db.Uuid
+  organization     Organization?         @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   status           GuestImportStatus     @default(PENDING)
   senderEmail      String?               @map("sender_email")
   mailboxMessageId String?               @map("mailbox_message_id")
@@ -322,6 +329,7 @@ model GuestImportJob {
   rowErrors        GuestImportRowError[]
   vipGuests        VipGuest[]
 
+  @@index([organizationId])
   @@index([status, createdAt])
   @@map("guest_import_jobs")
 }

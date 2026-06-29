@@ -264,8 +264,11 @@ export async function bookTickets(params: {
   return json.data;
 }
 
-export async function fetchOrderById(id: string): Promise<BookTicketsResponse> {
+export async function fetchOrderById(id: string, accessToken: string): Promise<BookTicketsResponse> {
   const res = await fetch(`${API_BASE_URL}/tickets/order/${id}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
     cache: 'no-store',
   });
   const json = await res.json();
@@ -319,10 +322,12 @@ export interface InitiatePaymentResponse {
 export async function initiatePayment(params: {
   orderId: string;
   gateway: 'vnpay' | 'momo';
+  accessToken: string;
   idempotencyKey?: string;
 }): Promise<InitiatePaymentResponse> {
   const headers: any = {
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${params.accessToken}`,
   };
   if (params.idempotencyKey) {
     headers['Idempotency-Key'] = params.idempotencyKey;

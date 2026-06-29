@@ -3,6 +3,8 @@ import { AppError } from '../../shared/lib/errors';
 import { ARTIST_BIO_BUCKET, safeObjectName, uploadObject } from '../../shared/lib/storage';
 import { getAiBioQueue } from '../../shared/lib/job-queues';
 import { invalidateConcertDetailCache } from '../concert/concert-detail-cache';
+import { AuthUser } from '../../shared/types/auth';
+import { authorizationService } from '../rbac/authorization.service';
 
 function hasReplacementCharacter(value: string) {
   return value.includes('\uFFFD');
@@ -19,12 +21,20 @@ function assertReadableVietnameseBio(value: string) {
 }
 
 export class ArtistBioService {
+  private async assertCanManageConcert(user: AuthUser, concertId: string) {
+    const allowed = await authorizationService.canManageConcert(user, concertId);
+    if (!allowed) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen quan ly AI bio cua concert nay.');
+    }
+  }
+
   public async uploadPdf(params: {
     concertId: string;
     file: Express.Multer.File | undefined;
     createdBy?: string;
+    user: AuthUser;
   }) {
-    const { concertId, file, createdBy } = params;
+    const { concertId, file, createdBy, user } = params;
     if (!file) {
       throw new AppError(400, 'PDF_FILE_REQUIRED', 'Vui long upload file PDF ho so nghe si.');
     }
@@ -39,6 +49,7 @@ export class ArtistBioService {
     if (!concert) {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Khong tim thay concert.');
     }
+    await this.assertCanManageConcert(user, concertId);
 
     const objectKey = `artist-bio/${concertId}/${Date.now()}-${safeObjectName(file.originalname)}`;
     await uploadObject({
@@ -62,11 +73,12 @@ export class ArtistBioService {
     return artistBio;
   }
 
-  public async getLatestByConcert(concertId: string) {
+  public async getLatestByConcert(concertId: string, user: AuthUser) {
     const concert = await prisma.concert.findUnique({ where: { id: concertId } });
     if (!concert) {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Khong tim thay concert.');
     }
+    await this.assertCanManageConcert(user, concertId);
 
     return prisma.artistBio.findFirst({
       where: { concertId },
@@ -74,8 +86,8 @@ export class ArtistBioService {
     });
   }
 
-  public async reviewBio(params: { artistBioId: string; reviewedBio: string; reviewedBy?: string }) {
-    const { artistBioId, reviewedBio, reviewedBy } = params;
+  public async reviewBio(params: { artistBioId: string; reviewedBio: string; reviewedBy?: string; user: AuthUser }) {
+    const { artistBioId, reviewedBio, reviewedBy, user } = params;
     if (!reviewedBio.trim()) {
       throw new AppError(400, 'BIO_CONTENT_REQUIRED', 'Noi dung bio da duyet khong duoc de trong.');
     }
@@ -84,6 +96,7 @@ export class ArtistBioService {
     if (!artistBio) {
       throw new AppError(404, 'ARTIST_BIO_NOT_FOUND', 'Khong tim thay ban ghi AI bio.');
     }
+    await this.assertCanManageConcert(user, artistBio.concertId);
 
     if (artistBio.status !== 'AI_GENERATED' && artistBio.status !== 'APPROVED') {
       throw new AppError(
@@ -108,11 +121,12 @@ export class ArtistBioService {
     return reviewedArtistBio;
   }
 
-  public async publishBio(artistBioId: string) {
+  public async publishBio(artistBioId: string, user: AuthUser) {
     const artistBio = await prisma.artistBio.findUnique({ where: { id: artistBioId } });
     if (!artistBio) {
       throw new AppError(404, 'ARTIST_BIO_NOT_FOUND', 'Khong tim thay ban ghi AI bio.');
     }
+    await this.assertCanManageConcert(user, artistBio.concertId);
 
     if (artistBio.status !== 'APPROVED' || !artistBio.reviewedBio) {
       throw new AppError(

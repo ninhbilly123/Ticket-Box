@@ -8,7 +8,16 @@ import { normalizeRole } from '../rbac/roles';
 
 const ACCESS_TOKEN_TTL = (process.env.JWT_ACCESS_TTL || '15m') as jwt.SignOptions['expiresIn'];
 const REFRESH_TOKEN_DAYS = Number(process.env.REFRESH_TOKEN_DAYS || 7);
-const jwtSecret = process.env.JWT_SECRET || 'ticketbox-dev-access-secret';
+
+function getRequiredJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is required. Add JWT_SECRET to backend/.env before starting the server.');
+  }
+  return secret;
+}
+
+const jwtSecret = getRequiredJwtSecret();
 
 export interface PublicUser {
   id: string;

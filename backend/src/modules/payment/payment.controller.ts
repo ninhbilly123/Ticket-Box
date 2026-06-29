@@ -9,6 +9,16 @@ export class PaymentController {
    */
   public async createPayment(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'AUTH_TOKEN_EXPIRED',
+            message: 'Authentication is required.',
+          },
+        });
+      }
+
       const { orderId, gateway } = req.body;
 
       if (!orderId || !gateway) {
@@ -32,6 +42,7 @@ export class PaymentController {
         gateway: String(gateway).toLowerCase() as 'vnpay' | 'momo',
         returnUrl,
         ipAddr,
+        userId: req.user.id,
       });
 
       return res.status(201).json({
@@ -135,7 +146,12 @@ export class PaymentController {
    */
   public async renderMockCheckout(req: Request, res: Response, next: NextFunction) {
     try {
+      if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
+        return res.status(403).send('<h2>Mock payment checkout is disabled.</h2>');
+      }
+
       const { paymentId, gateway, amount } = req.query;
+      const mockWebhookSecret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET || '';
 
       if (!paymentId || !gateway || !amount) {
         return res.status(400).send('<h2>Thiếu thông tin thanh toán (paymentId, gateway, amount).</h2>');
@@ -188,6 +204,7 @@ export class PaymentController {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
+                    'X-Mock-Payment-Secret': '${mockWebhookSecret}',
                   },
                   body: JSON.stringify({
                     paymentId: '${paymentId}',
@@ -236,6 +253,27 @@ export class PaymentController {
    */
   public async handleWebhook(req: Request, res: Response, next: NextFunction) {
     try {
+      if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'MOCK_WEBHOOK_DISABLED',
+            message: 'Mock payment webhook is disabled. Use signed VNPAY IPN for real payment updates.',
+          },
+        });
+      }
+
+      const expectedSecret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET;
+      if (!expectedSecret || req.header('X-Mock-Payment-Secret') !== expectedSecret) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'MOCK_WEBHOOK_FORBIDDEN',
+            message: 'Mock payment webhook secret is missing or invalid.',
+          },
+        });
+      }
+
       const { paymentId, status, transactionId, responseCode } = req.body;
 
       if (!paymentId || !status) {

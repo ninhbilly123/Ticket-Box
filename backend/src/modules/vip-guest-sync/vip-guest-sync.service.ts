@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken } from '../../shared/lib/crypto';
+import { AuthUser } from '../../shared/types/auth';
 import {
   safeObjectName,
   uploadObject,
@@ -30,35 +31,81 @@ interface RowErrorInput {
 }
 
 export class VipGuestSyncService {
+  private requireOrganization(user: AuthUser): string {
+    if (user.role !== 'ORGANIZER' || !user.organizationId) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Organizer organization is required.');
+    }
+    return user.organizationId;
+  }
+
+  private async assertEventCodesBelongToOrganization(eventCodes: string[], organizationId: string) {
+    if (eventCodes.length === 0) return;
+
+    const concerts = await prisma.concert.findMany({
+      where: { eventCode: { in: eventCodes } },
+      select: { eventCode: true, organizationId: true },
+    });
+    const allowed = new Set(concerts.filter((concert) => concert.organizationId === organizationId).map((concert) => concert.eventCode));
+    const invalid = eventCodes.filter((code) => !allowed.has(code));
+    if (invalid.length > 0) {
+      throw new AppError(403, 'SPONSOR_EVENT_NOT_ALLOWED', `EventCode khong thuoc organization hien tai: ${invalid.join(', ')}.`);
+    }
+  }
+
   public async createSponsorEmail(params: {
     email: string;
     displayName?: string;
     allowedEventCodes?: string[];
+    user: AuthUser;
   }) {
+    const organizationId = this.requireOrganization(params.user);
     const email = params.email.trim().toLowerCase();
     if (!this.isValidEmail(email)) {
       throw new AppError(400, 'INVALID_EMAIL', 'Email nha tai tro khong hop le.');
     }
+    const allowedEventCodes = params.allowedEventCodes || [];
+    await this.assertEventCodesBelongToOrganization(allowedEventCodes, organizationId);
 
-    return prisma.sponsorEmail.upsert({
-      where: { email },
-      update: {
-        displayName: params.displayName,
-        isActive: true,
-        allowedEventCodes: params.allowedEventCodes || [],
-      },
-      create: {
+    const existing = await prisma.sponsorEmail.findUnique({ where: { email } });
+    if (existing && existing.organizationId !== organizationId) {
+      throw new AppError(409, 'SPONSOR_EMAIL_EXISTS', 'Email nhan hang da duoc cau hinh cho organization khac.');
+    }
+
+    if (existing) {
+      return prisma.sponsorEmail.update({
+        where: { id: existing.id },
+        data: {
+          displayName: params.displayName,
+          isActive: true,
+          allowedEventCodes,
+          organizationId,
+        },
+      });
+    }
+
+    return prisma.sponsorEmail.create({
+      data: {
         email,
+        organizationId,
         displayName: params.displayName,
-        allowedEventCodes: params.allowedEventCodes || [],
+        allowedEventCodes,
       },
     });
   }
 
   public async updateSponsorEmail(
     id: string,
-    params: { displayName?: string; isActive?: boolean; allowedEventCodes?: string[] }
+    params: { displayName?: string; isActive?: boolean; allowedEventCodes?: string[]; user: AuthUser }
   ) {
+    const organizationId = this.requireOrganization(params.user);
+    const sponsor = await prisma.sponsorEmail.findUnique({ where: { id } });
+    if (!sponsor || sponsor.organizationId !== organizationId) {
+      throw new AppError(404, 'SPONSOR_EMAIL_NOT_FOUND', 'Khong tim thay email nhan hang.');
+    }
+    if (params.allowedEventCodes) {
+      await this.assertEventCodesBelongToOrganization(params.allowedEventCodes, organizationId);
+    }
+
     return prisma.sponsorEmail.update({
       where: { id },
       data: {
@@ -69,23 +116,27 @@ export class VipGuestSyncService {
     });
   }
 
-  public async listSponsorEmails() {
-    return prisma.sponsorEmail.findMany({ orderBy: { createdAt: 'desc' } });
+  public async listSponsorEmails(user: AuthUser) {
+    const organizationId = this.requireOrganization(user);
+    return prisma.sponsorEmail.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
   }
 
-  public async listImportReports() {
+  public async listImportReports(user: AuthUser) {
+    const organizationId = this.requireOrganization(user);
     return prisma.guestImportJob.findMany({
+      where: { organizationId },
       orderBy: { createdAt: 'desc' },
       include: { rowErrors: true },
     });
   }
 
-  public async getImportReport(id: string) {
+  public async getImportReport(id: string, user: AuthUser) {
+    const organizationId = this.requireOrganization(user);
     const report = await prisma.guestImportJob.findUnique({
       where: { id },
       include: { rowErrors: true, vipGuests: true },
     });
-    if (!report) {
+    if (!report || report.organizationId !== organizationId) {
       throw new AppError(404, 'IMPORT_REPORT_NOT_FOUND', 'Khong tim thay bao cao import.');
     }
     return report;
@@ -160,6 +211,7 @@ export class VipGuestSyncService {
     return prisma.guestImportJob.create({
       data: {
         status: 'PENDING',
+        organizationId: sponsor.organizationId,
         senderEmail,
         mailboxMessageId: params.messageId,
         originalFileName: params.fileName,
@@ -222,6 +274,15 @@ export class VipGuestSyncService {
             rawData: this.toJson(row),
             errorCode: 'EVENT_CODE_NOT_FOUND',
             message: `Khong tim thay concert voi eventCode ${row.eventCode}.`,
+          });
+          continue;
+        }
+        if (importJob.organizationId && concert.organizationId !== importJob.organizationId) {
+          rowErrors.push({
+            rowNumber,
+            rawData: this.toJson(row),
+            errorCode: 'EVENT_CODE_NOT_ALLOWED',
+            message: `Concert ${row.eventCode} khong thuoc organization cua sponsor.`,
           });
           continue;
         }

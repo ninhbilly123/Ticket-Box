@@ -43,12 +43,18 @@ export default function ProfilePage() {
   }
 
   async function handlePayNow(orderId: string) {
+    if (!session) {
+      setError('Ban can dang nhap de thanh toan don hang.');
+      return;
+    }
+
     setPayingOrderId(orderId);
     setError(null);
     try {
       const payment = await initiatePayment({
         orderId,
         gateway: 'vnpay',
+        accessToken: session.accessToken,
         idempotencyKey: `pay-profile-${orderId}-${Date.now()}`,
       });
       window.open(payment.paymentUrl, '_blank', 'noopener,noreferrer');

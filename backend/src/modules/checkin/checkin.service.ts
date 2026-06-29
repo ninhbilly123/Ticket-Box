@@ -1,7 +1,6 @@
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
-import { publishToQueue } from '../../shared/lib/rabbitmq';
-import { verifyVipGuestQrToken } from '../../shared/lib/crypto';
+import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 export class CheckinService {
   public async listAssignedConcerts(staffId: string) {
@@ -101,7 +100,12 @@ export class CheckinService {
       return { status: 'WRONG_CONCERT' };
     }
 
-    const scanDate = new Date(scannedAtLocal).toDateString();
+    const scannedAt = new Date(scannedAtLocal);
+    if (Number.isNaN(scannedAt.getTime())) {
+      return { status: 'INVALID_SCAN_TIME' };
+    }
+
+    const scanDate = scannedAt.toDateString();
     const concertDate = new Date(concert.startAt).toDateString();
     if (scanDate !== concertDate) {
       return { status: 'WRONG_DATE' };
@@ -123,8 +127,20 @@ export class CheckinService {
       };
     }
 
-    // 5. Ghi nhận check-in thành công
-    return await prisma.$transaction(async (tx) => {
+    // 5. Ghi nhận check-in thành công theo kiểu atomic để chống quét trùng đồng thời.
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedTicket = await tx.ticket.updateMany({
+        where: { id: ticket.id, status: 'valid' },
+        data: {
+          status: 'used',
+          usedAt: scannedAt,
+        },
+      });
+
+      if (updatedTicket.count === 0) {
+        return null;
+      }
+
       // Tạo bản ghi log check-in thành công
       const checkinLog = await tx.checkinLog.create({
         data: {
@@ -132,17 +148,8 @@ export class CheckinService {
           gateStaffId,
           deviceId,
           synced: true,
-          scannedAtLocal: new Date(scannedAtLocal),
+          scannedAtLocal: scannedAt,
           syncedAt: new Date(),
-        },
-      });
-
-      // Cập nhật trạng thái vé thành 'used'
-      await tx.ticket.update({
-        where: { id: ticket.id },
-        data: {
-          status: 'used',
-          usedAt: new Date(scannedAtLocal),
         },
       });
 
@@ -156,6 +163,26 @@ export class CheckinService {
         },
       };
     });
+
+    if (result) {
+      return result;
+    }
+
+    const latestCheckin = await prisma.checkinLog.findFirst({
+      where: { ticketId: ticket.id, synced: true },
+      orderBy: { scannedAtLocal: 'asc' },
+    });
+
+    if (latestCheckin) {
+      return {
+        status: 'ALREADY_USED',
+        checkedInAt: latestCheckin.scannedAtLocal,
+        deviceId: latestCheckin.deviceId,
+      };
+    }
+
+    const latestTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+    return { status: latestTicket?.status === 'cancelled' ? 'CANCELLED' : 'INVALID_TICKET' };
   }
 
   private async scanImportedVipGuest(params: {
@@ -480,122 +507,17 @@ export class CheckinService {
       });
     }
 
-    const identifier = guest.email || guest.phone || guest.identifier;
-    if (!identifier) {
-      throw new AppError(400, 'VIP_GUEST_CONTACT_REQUIRED', 'Khach VIP chua co email hoac so dien thoai.');
-    }
-
-    // Tìm user và vé tương ứng
-    let user = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: identifier }, { phone: identifier }],
-      },
+    const qrToken = generateVipGuestQrToken(guest.id);
+    await prisma.vipGuest.update({
+      where: { id: guest.id },
+      data: { qrToken },
     });
 
-    // Nếu chưa có user (khách VIP chưa tạo tài khoản), tự động tạo tài khoản phụ cho họ
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email: identifier.includes('@') ? identifier : `${guest.id}@vip.ticketbox.com`,
-          passwordHash: 'AUTO_GENERATED',
-          fullName: guest.fullName,
-          phone: !identifier.includes('@') ? identifier : null,
-          role: 'AUDIENCE',
-        },
-      });
-    }
-
-    // Tìm vé
-    let ticket = await prisma.ticket.findFirst({
-      where: {
-        userId: user.id,
-        orderItem: {
-          order: {
-            concertId: guest.concertId,
-          },
-        },
-      },
-    });
-
-    // Nếu khách VIP có trong danh sách nhưng chưa được phát hành vé, tự động phát hành 1 vé VIP
-    if (!ticket) {
-      // Tìm ticket type khớp với hạng ghế (zone) của khách VIP
-      let vipType = await prisma.ticketType.findFirst({
-        where: {
-          concertId: guest.concertId,
-          name: { equals: guest.zone, mode: 'insensitive' },
-        },
-      });
-
-      // Nếu không tìm thấy hạng vé khớp chính xác với zone, tìm VIP/SVIP/GUEST_LIST làm dự phòng
-      if (!vipType) {
-        vipType = await prisma.ticketType.findFirst({
-          where: {
-            concertId: guest.concertId,
-            name: { in: ['VIP', 'SVIP', 'GUEST_LIST'] },
-          },
-        });
-      }
-
-      // Nếu vẫn không tìm thấy, lấy ticket type đầu tiên có sẵn
-      if (!vipType) {
-        vipType = await prisma.ticketType.findFirst({
-          where: { concertId: guest.concertId },
-        });
-      }
-
-      if (!vipType) {
-        throw new AppError(400, 'BAD_REQUEST', 'Concert này chưa được cấu hình hạng vé nào.');
-      }
-
-      ticket = await prisma.$transaction(async (tx) => {
-        const order = await tx.order.create({
-          data: {
-            userId: user!.id,
-            concertId: guest.concertId,
-            status: 'paid',
-            totalAmount: 0,
-            idempotencyKey: `vip-auto-gen-${guest.id}`,
-          },
-        });
-
-        const orderItem = await tx.orderItem.create({
-          data: {
-            orderId: order.id,
-            ticketTypeId: vipType!.id,
-            quantity: 1,
-            unitPrice: 0,
-          },
-        });
-
-        return await tx.ticket.create({
-          data: {
-            orderItemId: orderItem.id,
-            userId: user!.id,
-            qrCode: `vip-qr-${guest.id}`,
-            status: 'valid',
-          },
-        });
-      });
-
-      // Sau khi tạo vé VIP thành công, đẩy tin nhắn xác nhận mua vé (VIP 0đ) vào RabbitMQ
-      await publishToQueue('ticketbox_notifications', {
-        type: 'purchase_confirm',
-        payload: {
-          userId: user.id,
-          concertId: guest.concertId,
-          ticketId: ticket!.id,
-        },
-      });
-    }
-
-    // Tiến hành soát vé
-    return await this.scanTicket({
-      ticketId: ticket.id,
+    return this.scanImportedVipGuest({
+      qrToken,
       deviceId,
       scannedAtLocal: new Date().toISOString(),
       concertId: guest.concertId,
-      gateStaffId,
     });
   }
 

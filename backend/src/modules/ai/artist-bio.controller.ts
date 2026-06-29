@@ -15,6 +15,7 @@ export class ArtistBioController {
         concertId: req.params.concertId,
         file: req.file,
         createdBy: req.user?.id,
+        user: req.user!,
       });
 
       return res.status(201).json({ success: true, data: artistBio });
@@ -25,7 +26,7 @@ export class ArtistBioController {
 
   public async getLatestByConcert(req: Request, res: Response, next: NextFunction) {
     try {
-      const artistBio = await artistBioService.getLatestByConcert(req.params.concertId);
+      const artistBio = await artistBioService.getLatestByConcert(req.params.concertId, req.user!);
       return res.status(200).json({ success: true, data: artistBio });
     } catch (err) {
       next(err);
@@ -39,6 +40,7 @@ export class ArtistBioController {
         artistBioId: req.params.id,
         reviewedBio: body.reviewedBio,
         reviewedBy: req.user?.id,
+        user: req.user!,
       });
       return res.status(200).json({ success: true, data: artistBio });
     } catch (err) {
@@ -48,7 +50,7 @@ export class ArtistBioController {
 
   public async publishBio(req: Request, res: Response, next: NextFunction) {
     try {
-      const artistBio = await artistBioService.publishBio(req.params.id);
+      const artistBio = await artistBioService.publishBio(req.params.id, req.user!);
       return res.status(200).json({ success: true, data: artistBio });
     } catch (err) {
       next(err);

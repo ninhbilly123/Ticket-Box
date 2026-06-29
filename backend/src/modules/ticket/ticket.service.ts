@@ -1,5 +1,5 @@
 import { prisma } from '../../shared/lib/prisma';
-import redisClient from '../../shared/lib/redis';
+import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 
 export class TicketService {
@@ -126,14 +126,14 @@ export class TicketService {
 
       const mappedTickets = tickets.map((t) => ({
         ...t,
-        seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`, // Mock seatNumber for frontend display compatibility
+        seatNumber: t.seatNumber || null,
       }));
 
       // 6. Invalidate Redis Cache (asynchronous/non-blocking delete)
       const cacheKey = `ticket_inventory:${ticketTypeId}`;
       try {
-        if (redisClient.isOpen) {
-          await redisClient.del(cacheKey);
+        if (isRedisReady()) {
+          await runRedisOperation(() => redisClient.del(cacheKey));
         }
       } catch (err) {
         console.error(`[Redis Cache Invalidation Error] Failed to delete key ${cacheKey}:`, err);
@@ -168,7 +168,7 @@ export class TicketService {
     const flatTickets = order.orderItems.flatMap((item) =>
       item.tickets.map((t) => ({
         ...t,
-        seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`,
+        seatNumber: t.seatNumber || null,
       }))
     );
 
@@ -203,7 +203,7 @@ export class TicketService {
           id: t.id,
           qrCode: t.qrCode,
           status: t.status,
-          seatNumber: t.seatNumber || `GHE-${t.qrCode.slice(-4)}`,
+          seatNumber: t.seatNumber || null,
           ticketType: item.ticketType.name,
           price: item.unitPrice,
         }))
