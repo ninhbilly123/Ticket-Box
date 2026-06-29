@@ -4,6 +4,20 @@ import { ARTIST_BIO_BUCKET, safeObjectName, uploadObject } from '../../shared/li
 import { getAiBioQueue } from '../../shared/lib/job-queues';
 import { invalidateConcertDetailCache } from '../concert/concert-detail-cache';
 
+function hasReplacementCharacter(value: string) {
+  return value.includes('\uFFFD');
+}
+
+function assertReadableVietnameseBio(value: string) {
+  if (hasReplacementCharacter(value)) {
+    throw new AppError(
+      400,
+      'BIO_ENCODING_INVALID',
+      'Noi dung bio co ky tu loi font. Vui long tai lai ban AI hoac nhap lai noi dung bang UTF-8.'
+    );
+  }
+}
+
 export class ArtistBioService {
   public async uploadPdf(params: {
     concertId: string;
@@ -79,10 +93,13 @@ export class ArtistBioService {
       );
     }
 
+    const normalizedReviewedBio = reviewedBio.trim();
+    assertReadableVietnameseBio(normalizedReviewedBio);
+
     const reviewedArtistBio = await prisma.artistBio.update({
       where: { id: artistBioId },
       data: {
-        reviewedBio: reviewedBio.trim(),
+        reviewedBio: normalizedReviewedBio,
         reviewedBy,
         status: 'APPROVED',
       },
@@ -104,6 +121,8 @@ export class ArtistBioService {
         'Chi co the publish bio da duoc duyet.'
       );
     }
+
+    assertReadableVietnameseBio(artistBio.reviewedBio);
 
     await prisma.artistBio.updateMany({
       where: { concertId: artistBio.concertId, status: 'PUBLISHED' },
