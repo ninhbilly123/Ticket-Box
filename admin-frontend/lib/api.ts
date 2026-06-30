@@ -31,6 +31,9 @@ export interface AuthSession {
   user: SessionUser;
 }
 
+export const ADMIN_SESSION_KEY = 'ticketbox_admin_session';
+export const ADMIN_SESSION_CHANGED_EVENT = 'ticketbox_admin_session_changed';
+
 export interface Organization {
   id: string;
   name: string;
@@ -298,44 +301,156 @@ interface ApiEnvelope<T> {
   };
 }
 
+type ApiError = Error & { code?: string; status?: number };
+
+let refreshSessionPromise: Promise<AuthSession | null> | null = null;
+
+function canUseBrowserStorage() {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+export function readStoredAdminSession(): AuthSession | null {
+  if (!canUseBrowserStorage()) return null;
+
+  const raw = window.localStorage.getItem(ADMIN_SESSION_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as AuthSession;
+  } catch {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    return null;
+  }
+}
+
+export function writeStoredAdminSession(session: AuthSession) {
+  if (!canUseBrowserStorage()) return;
+  window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+  window.dispatchEvent(new CustomEvent<AuthSession>(ADMIN_SESSION_CHANGED_EVENT, { detail: session }));
+}
+
+export function clearStoredAdminSession() {
+  if (!canUseBrowserStorage()) return;
+  window.localStorage.removeItem(ADMIN_SESSION_KEY);
+  window.dispatchEvent(new CustomEvent<null>(ADMIN_SESSION_CHANGED_EVENT, { detail: null }));
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const json = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok || !json.success) {
     const message = json.error?.message || `Yêu cầu thất bại với mã trạng thái ${response.status}`;
-    const error = new Error(message);
-    (error as Error & { code?: string }).code = json.error?.code;
+    const error = new Error(message) as ApiError;
+    error.code = json.error?.code;
+    error.status = response.status;
     throw error;
   }
   return json.data as T;
+}
+
+function shouldRefresh(error: unknown) {
+  const apiError = error as ApiError;
+  return apiError.status === 401 || apiError.code === 'AUTH_TOKEN_EXPIRED';
+}
+
+function getFreshestToken(token?: string) {
+  if (!token) return undefined;
+  const storedSession = readStoredAdminSession();
+  return storedSession?.accessToken || token;
+}
+
+async function refreshStoredAdminSession(): Promise<AuthSession | null> {
+  const storedSession = readStoredAdminSession();
+  if (!storedSession?.refreshToken) {
+    clearStoredAdminSession();
+    return null;
+  }
+
+  if (!refreshSessionPromise) {
+    refreshSessionPromise = fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: storedSession.refreshToken }),
+    })
+      .then((response) => parseResponse<AuthSession>(response))
+      .then((nextSession) => {
+        writeStoredAdminSession(nextSession);
+        return nextSession;
+      })
+      .catch(() => {
+        clearStoredAdminSession();
+        return null;
+      })
+      .finally(() => {
+        refreshSessionPromise = null;
+      });
+  }
+
+  return refreshSessionPromise;
 }
 
 export async function apiRequest<T>(
   path: string,
   options: RequestInit & { token?: string } = {}
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
+  const request = async (token?: string) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string> | undefined),
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+    return parseResponse<T>(response);
   };
 
-  if (options.token) {
-    headers.Authorization = `Bearer ${options.token}`;
-  }
+  const token = getFreshestToken(options.token);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
-  return parseResponse<T>(response);
+  try {
+    return await request(token);
+  } catch (error) {
+    if (!options.token || !shouldRefresh(error) || path === '/auth/refresh') {
+      throw error;
+    }
+
+    const refreshedSession = await refreshStoredAdminSession();
+    if (!refreshedSession) {
+      throw error;
+    }
+
+    return request(refreshedSession.accessToken);
+  }
 }
 
 async function apiMultipartRequest<T>(path: string, token: string, body: FormData): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body,
-  });
-  return parseResponse<T>(response);
+  const request = async (accessToken: string) => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body,
+    });
+    return parseResponse<T>(response);
+  };
+
+  try {
+    return await request(getFreshestToken(token) || token);
+  } catch (error) {
+    if (!shouldRefresh(error)) {
+      throw error;
+    }
+
+    const refreshedSession = await refreshStoredAdminSession();
+    if (!refreshedSession) {
+      throw error;
+    }
+
+    return request(refreshedSession.accessToken);
+  }
 }
 
 export const adminApi = {

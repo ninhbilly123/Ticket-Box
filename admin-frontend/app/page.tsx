@@ -26,16 +26,18 @@ import {
   StaffAssignment,
   TicketType,
   WhitelistConfig,
+  ADMIN_SESSION_CHANGED_EVENT,
   adminApi,
+  clearStoredAdminSession,
   formatMoney,
+  readStoredAdminSession,
+  writeStoredAdminSession,
 } from '../lib/api';
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
 import ConcertSetup from '../components/concert-setup';
 import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
 type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
-
-const SESSION_KEY = 'ticketbox_admin_session';
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'overview', label: 'Tổng quan', icon: BarChart3 },
@@ -119,20 +121,32 @@ export default function AdminHomePage() {
   const isOrganizer = session?.user.role === 'ORGANIZER';
 
   useEffect(() => {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return;
+    const syncSessionFromStorage = () => {
+      setSession(readStoredAdminSession());
+    };
 
-    try {
-      const parsed = JSON.parse(raw) as AuthSession;
-      adminApi.me(parsed.accessToken)
-        .then((user) => setSession({ ...parsed, user }))
-        .catch(() => {
-          localStorage.removeItem(SESSION_KEY);
-          setSession(null);
-        });
-    } catch {
-      localStorage.removeItem(SESSION_KEY);
+    window.addEventListener(ADMIN_SESSION_CHANGED_EVENT, syncSessionFromStorage);
+
+    const parsed = readStoredAdminSession();
+    if (!parsed) {
+      return () => window.removeEventListener(ADMIN_SESSION_CHANGED_EVENT, syncSessionFromStorage);
     }
+
+    adminApi.me(parsed.accessToken)
+      .then((user) => {
+        const latest = readStoredAdminSession() || parsed;
+        setSession({ ...latest, user });
+      })
+      .catch(() => {
+        const refreshed = readStoredAdminSession();
+        if (refreshed && refreshed.accessToken !== parsed.accessToken) {
+          setSession(refreshed);
+          return;
+        }
+        clearStoredAdminSession();
+      });
+
+    return () => window.removeEventListener(ADMIN_SESSION_CHANGED_EVENT, syncSessionFromStorage);
   }, []);
 
   useEffect(() => {
@@ -197,7 +211,7 @@ export default function AdminHomePage() {
     setError(null);
     try {
       const nextSession = await adminApi.login(loginForm.email, loginForm.password);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+      writeStoredAdminSession(nextSession);
       setSession(nextSession);
       setNotice(`Đã đăng nhập với vai trò ${formatRoleLabel(nextSession.user.role)}.`);
     } catch (err) {
@@ -213,7 +227,7 @@ export default function AdminHomePage() {
     if (session?.refreshToken) {
       await adminApi.logout(session.refreshToken).catch(() => undefined);
     }
-    localStorage.removeItem(SESSION_KEY);
+    clearStoredAdminSession();
     setSession(null);
     setConcerts([]);
     setSelectedConcertId('');
