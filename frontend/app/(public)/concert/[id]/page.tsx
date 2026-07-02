@@ -95,82 +95,106 @@ export default function ConcertDetailPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 pb-20">
-      <div className="max-w-6xl mx-auto px-6 py-6 border-b border-gray-900">
+      <div className="max-w-3xl mx-auto px-6 py-6 border-b border-gray-900">
         <Link href="/" className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Quay lại danh sách
         </Link>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <article className="lg:col-span-8 min-w-0 bg-gray-900 p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
-            <p className="text-xs font-bold uppercase text-indigo-400 mb-3">Thông tin concert</p>
-            <h1 className="text-2xl md:text-4xl font-extrabold text-white break-words">{concert.title}</h1>
-            <p className="mt-5 text-sm md:text-base text-gray-400 leading-relaxed whitespace-pre-line break-words">
+      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
+        {/* Title Section */}
+        <div className="text-center">
+          <h1 className="text-3xl md:text-5xl font-extrabold text-white break-words">{concert.title}</h1>
+        </div>
+
+        {/* Other Details Section */}
+        <div className="bg-gray-900 p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl space-y-6">
+          <div>
+            <h2 className="text-lg font-bold text-white mb-3">Mô tả sự kiện</h2>
+            <p className="text-sm md:text-base text-gray-400 leading-relaxed whitespace-pre-line break-words">
               {concert.description || 'Concert chưa có mô tả.'}
             </p>
-
-            <dl className="mt-8 pt-6 border-t border-gray-800 grid grid-cols-1 sm:grid-cols-3 gap-6">
-              <div className="flex gap-3 min-w-0">
-                <Music className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <dt className="text-[10px] uppercase text-gray-500">Nghệ sĩ</dt>
-                  <dd className="mt-1 text-sm font-semibold text-white break-words">{concert.artist}</dd>
-                </div>
-              </div>
-              <div className="flex gap-3 min-w-0">
-                <Calendar className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <dt className="text-[10px] uppercase text-gray-500">Thời gian</dt>
-                  <dd className="mt-1 text-sm font-semibold text-white">{formatDateTime(concert.dateTime)}</dd>
-                </div>
-              </div>
-              <div className="flex gap-3 min-w-0">
-                <MapPin className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <dt className="text-[10px] uppercase text-gray-500">Địa điểm</dt>
-                  <dd className="mt-1 text-sm font-semibold text-white break-words">{concert.location}</dd>
-                </div>
-              </div>
-            </dl>
-        </article>
-
-        <aside className="lg:col-span-4 lg:row-span-2 lg:sticky lg:top-6 bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl min-w-0">
-          <div className="flex items-center gap-2 text-white">
-            <Ticket className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-bold">Vé tham dự</h2>
           </div>
 
-          {ticketSummary ? (
-            <dl className="mt-6 space-y-4 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-gray-500">Loại vé</dt>
-                <dd className="font-semibold text-white">{ticketSummary.typeCount}</dd>
+          <dl className="pt-6 border-t border-gray-800 grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="flex gap-3 min-w-0">
+              <Music className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase text-gray-500">Nghệ sĩ</dt>
+                <dd className="mt-1 text-sm font-semibold text-white break-words">{concert.artist}</dd>
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-gray-500">Giá từ</dt>
-                <dd className="font-bold text-indigo-400">{formatCurrency(ticketSummary.minimumPrice)}</dd>
+            </div>
+            <div className="flex gap-3 min-w-0">
+              <Calendar className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase text-gray-500">Thời gian</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatDateTime(concert.dateTime)}</dd>
               </div>
-              <div className="flex items-center justify-between gap-4 border-t border-gray-800 pt-4">
-                <dt className="text-gray-500">Vé còn lại</dt>
-                <dd className="font-semibold text-white">{ticketSummary.remaining}</dd>
+            </div>
+            <div className="flex gap-3 min-w-0">
+              <MapPin className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase text-gray-500">Địa điểm</dt>
+                <dd className="mt-1 text-sm font-semibold text-white break-words">{concert.location}</dd>
               </div>
-            </dl>
-          ) : (
-            <p className="mt-5 text-sm text-gray-500">Chưa có thông tin vé.</p>
-          )}
+            </div>
+          </dl>
+        </div>
+
+        {/* Ticket Summary Section (Centered) */}
+        {ticketSummary ? (
+          <div className="max-w-md mx-auto bg-gray-900/60 p-5 rounded-2xl border border-gray-800 text-center shadow-md">
+            <div className="grid grid-cols-3 gap-2 text-sm divide-x divide-gray-800">
+              <div>
+                <dt className="text-gray-500 text-xs uppercase mb-1">Số lượng loại vé</dt>
+                <dd className="font-semibold text-white text-base">{ticketSummary.typeCount}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 text-xs uppercase mb-1">Giá chỉ từ</dt>
+                <dd className="font-bold text-indigo-400 text-base">{formatCurrency(ticketSummary.minimumPrice)}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 text-xs uppercase mb-1">Số vé còn lại</dt>
+                <dd className="font-semibold text-white text-base">{ticketSummary.remaining}</dd>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-center text-sm text-gray-500">Chưa có thông tin vé.</p>
+        )}
+
+        {/* Booking Button (Centered with pulse) */}
+        <div className="flex justify-center">
+          <style dangerouslySetInnerHTML={{
+            __html: `
+            @keyframes slowPulse {
+              0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2), 0 2px 4px -2px rgba(99, 102, 241, 0.2);
+              }
+              50% {
+                transform: scale(1.025);
+                box-shadow: 0 0 20px 6px rgba(99, 102, 241, 0.6);
+              }
+            }
+            .animate-slow-pulse {
+              animation: slowPulse 2.5s infinite ease-in-out;
+            }
+          `}} />
 
           <Link
             href={`/concert/${concert.id}/booking`}
-            className="mt-7 w-full min-h-12 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+            className="animate-slow-pulse w-full max-w-sm min-h-12 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 transform"
           >
-            Đặt vé
+            Đặt vé ngay
             <ArrowRight className="w-4 h-4" />
           </Link>
-        </aside>
+        </div>
 
+        {/* Artist Bio (Optional) */}
         {artistBio && (
-          <section className="lg:col-span-8 min-w-0 bg-gray-900 p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
+          <section className="bg-gray-900 p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
             <h2 className="text-lg md:text-xl font-bold text-white mb-5 flex items-center gap-2">
               <Mic2 className="w-5 h-5 text-indigo-400 shrink-0" />
               Giới thiệu nghệ sĩ
