@@ -127,7 +127,13 @@ export default function ConcertListingPage() {
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
+              onClick={(e) => {
+                try {
+                  e.currentTarget.showPicker();
+                } catch {}
+              }}
+              style={{ colorScheme: 'dark' }}
+              className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
             />
           </div>
 
