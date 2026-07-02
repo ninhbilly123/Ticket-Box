@@ -121,6 +121,12 @@ export default function ConcertDetailPage() {
   }, [concertId]);
 
   useEffect(() => {
+    if (session) {
+      loadHistory(session);
+    }
+  }, [session]);
+
+  useEffect(() => {
     if (!session || waitingStatus?.status !== 'WAITING') return;
 
     const timer = window.setInterval(async () => {
