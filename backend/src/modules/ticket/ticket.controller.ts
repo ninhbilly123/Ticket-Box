@@ -48,10 +48,19 @@ export class TicketController {
     }
   }
 
-  public async scanTicket(req: Request, res: Response, next: NextFunction) {
+  public async getHistory(req: Request, res: Response, next: NextFunction) {
     try {
-      const { qrToken } = req.body;
-      const result = await ticketService.scanTicket(qrToken);
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Vui lòng đăng nhập để xem lịch sử đơn hàng.',
+          },
+        });
+      }
+
+      const result = await ticketService.getHistory(req.user.id);
 
       return res.status(200).json({
         success: true,

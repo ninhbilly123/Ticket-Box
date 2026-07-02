@@ -1,8 +1,8 @@
-## Context
+﻿## Context
 
-Dự án **TicketBox** yêu cầu xây dựng luồng nghiệp vụ xem thông tin và mua vé dành cho khán giả. Đây là tính năng trực tiếp chịu tải lớn khi mở bán concert (flash sale), đòi hỏi hệ thống phải đảm bảo hiệu năng cao, phản hồi nhanh và ngăn chặn được các vấn đề race condition hay vượt giới hạn mua vé của mỗi tài khoản.
+Dá»± Ã¡n **TicketBox** yÃªu cáº§u xÃ¢y dá»±ng luá»“ng nghiá»‡p vá»¥ xem thÃ´ng tin vÃ  mua vÃ© dÃ nh cho khÃ¡n giáº£. ÄÃ¢y lÃ  tÃ­nh nÄƒng trá»±c tiáº¿p chá»‹u táº£i lá»›n khi má»Ÿ bÃ¡n concert (flash sale), Ä‘Ã²i há»i há»‡ thá»‘ng pháº£i Ä‘áº£m báº£o hiá»‡u nÄƒng cao, pháº£n há»“i nhanh vÃ  ngÄƒn cháº·n Ä‘Æ°á»£c cÃ¡c váº¥n Ä‘á» race condition hay vÆ°á»£t giá»›i háº¡n mua vÃ© cá»§a má»—i tÃ i khoáº£n.
 
-Tài liệu này thiết kế kiến trúc kỹ thuật sử dụng:
+TÃ i liá»‡u nÃ y thiáº¿t káº¿ kiáº¿n trÃºc ká»¹ thuáº­t sá»­ dá»¥ng:
 - **Backend**: Node.js + Express.js + Prisma ORM
 - **Database**: PostgreSQL 16
 - **Caching**: Redis 7
@@ -11,19 +11,19 @@ Tài liệu này thiết kế kiến trúc kỹ thuật sử dụng:
 ## Goals / Non-Goals
 
 **Goals:**
-- Tối ưu hóa hiệu năng hiển thị số lượng vé còn lại thông qua cơ chế Redis Cache-aside (TTL 30s).
-- Đảm bảo tính chính xác và an toàn dữ liệu, không xảy ra tình trạng bán quá số lượng vé khả dụng (overselling) khi có hàng ngàn người truy cập cùng lúc.
-- Áp dụng kiểm tra chặt chẽ giới hạn số vé tối đa một người dùng có thể mua (per-user limit) dựa trên lịch sử giao dịch thành công.
-- Tải và tương tác sơ đồ chỗ ngồi SVG linh hoạt mà không làm nặng cơ sở dữ liệu.
+- Tá»‘i Æ°u hÃ³a hiá»‡u nÄƒng hiá»ƒn thá»‹ sá»‘ lÆ°á»£ng vÃ© cÃ²n láº¡i thÃ´ng qua cÆ¡ cháº¿ Redis Cache-aside (TTL 30s).
+- Äáº£m báº£o tÃ­nh chÃ­nh xÃ¡c vÃ  an toÃ n dá»¯ liá»‡u, khÃ´ng xáº£y ra tÃ¬nh tráº¡ng bÃ¡n quÃ¡ sá»‘ lÆ°á»£ng vÃ© kháº£ dá»¥ng (overselling) khi cÃ³ hÃ ng ngÃ n ngÆ°á»i truy cáº­p cÃ¹ng lÃºc.
+- Ãp dá»¥ng kiá»ƒm tra cháº·t cháº½ giá»›i háº¡n sá»‘ vÃ© tá»‘i Ä‘a má»™t ngÆ°á»i dÃ¹ng cÃ³ thá»ƒ mua (per-user limit) dá»±a trÃªn lá»‹ch sá»­ giao dá»‹ch thÃ nh cÃ´ng.
+- Táº£i vÃ  tÆ°Æ¡ng tÃ¡c sÆ¡ Ä‘á»“ chá»— ngá»“i SVG linh hoáº¡t mÃ  khÃ´ng lÃ m náº·ng cÆ¡ sá»Ÿ dá»¯ liá»‡u.
 
 **Non-Goals:**
-- Tích hợp cổng thanh toán thực tế (VNPAY/MoMo) - chỉ mô phỏng trạng thái thanh toán của Order (`PAID`).
-- Soát vé và đồng bộ offline (thuộc phạm vi module soát vé).
+- TÃ­ch há»£p cá»•ng thanh toÃ¡n thá»±c táº¿ (VNPAY/MoMo) - chá»‰ mÃ´ phá»ng tráº¡ng thÃ¡i thanh toÃ¡n cá»§a Order (`PAID`).
+- SoÃ¡t vÃ© vÃ  Ä‘á»“ng bá»™ offline (thuá»™c pháº¡m vi module soÃ¡t vÃ©).
 
 ## Decisions
 
-### 1. Thiết kế Database Schema (Prisma)
-Chúng ta thiết kế các Model để quản lý Concert, TicketType, Order và Ticket:
+### 1. Thiáº¿t káº¿ Database Schema (Prisma)
+ChÃºng ta thiáº¿t káº¿ cÃ¡c Model Ä‘á»ƒ quáº£n lÃ½ Concert, TicketType, Order vÃ  Ticket:
 
 ```prisma
 model Concert {
@@ -33,7 +33,7 @@ model Concert {
   artist      String
   dateTime    DateTime
   location    String
-  seatMapUrl  String       // Đường dẫn tới file SVG sơ đồ chỗ ngồi trên CDN/Storage
+  seatMapUrl  String       // ÄÆ°á»ng dáº«n tá»›i file SVG sÆ¡ Ä‘á»“ chá»— ngá»“i trÃªn CDN/Storage
   ticketTypes TicketType[]
   orders      Order[]
   createdAt   DateTime     @default(now())
@@ -48,8 +48,8 @@ model TicketType {
   concert            Concert  @relation(fields: [concertId], references: [id], onDelete: Cascade)
   name               String   // GA, SVIP, VIP, CAT1, CAT2...
   price              Decimal  @db.Decimal(12, 2)
-  totalQuantity      Int      // Tổng số vé phát hành của hạng này
-  maxLimitPerUser    Int      // Số vé tối đa 1 user được phép mua thành công
+  totalQuantity      Int      // Tá»•ng sá»‘ vÃ© phÃ¡t hÃ nh cá»§a háº¡ng nÃ y
+  maxLimitPerUser    Int      // Sá»‘ vÃ© tá»‘i Ä‘a 1 user Ä‘Æ°á»£c phÃ©p mua thÃ nh cÃ´ng
   tickets            Ticket[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -59,7 +59,7 @@ model TicketType {
 
 model Order {
   id          String      @id @default(uuid())
-  userId      String      // Liên kết tới tài khoản người dùng
+  userId      String      // LiÃªn káº¿t tá»›i tÃ i khoáº£n ngÆ°á»i dÃ¹ng
   concertId   String
   concert     Concert     @relation(fields: [concertId], references: [id])
   totalAmount Decimal     @db.Decimal(12, 2)
@@ -83,7 +83,7 @@ model Ticket {
   order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   ticketTypeId String
   ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
-  seatNumber   String?      // Mã ghế cụ thể (nếu có, e.g. A12)
+  seatNumber   String?      // MÃ£ gháº¿ cá»¥ thá»ƒ (náº¿u cÃ³, e.g. A12)
   status       TicketStatus @default(RESERVED) // RESERVED, BOOKED, REFUNDED
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -92,43 +92,43 @@ model Ticket {
 }
 
 enum TicketStatus {
-  RESERVED // Khi tạo order pending (khoá tạm thời)
-  BOOKED   // Khi order đã thanh toán thành công (PAID)
-  REFUNDED // Khi hoàn vé
+  RESERVED // Khi táº¡o order pending (khoÃ¡ táº¡m thá»i)
+  BOOKED   // Khi order Ä‘Ã£ thanh toÃ¡n thÃ nh cÃ´ng (PAID)
+  REFUNDED // Khi hoÃ n vÃ©
 }
 ```
 
-### 2. Thiết kế Cơ chế Redis Cache-aside cho Vé còn lại
-Để giảm tải cho PostgreSQL khi hàng ngàn người dùng tải trang danh sách/chi tiết concert cùng lúc:
-- **Key Pattern**: `ticket_inventory:<ticket_type_id>` lưu giá trị integer là số vé còn lại.
-- **Luồng Đọc (Read)**:
-  1. Frontend gọi API lấy số vé còn lại.
-  2. Backend kiểm tra trên Redis:
-     - *Nếu có (Cache Hit)*: Trả về kết quả ngay lập tức.
-     - *Nếu không có (Cache Miss)*: Query DB tính số vé đã bán (Tickets có status `RESERVED` hoặc `BOOKED`). Số vé còn lại = `totalQuantity` - `Sold`. Lưu giá trị này vào Redis với **TTL 30 giây**.
-- **Luồng Invalidate (Ghi/Huỷ)**:
-  - Khi một giao dịch đặt vé mới được tạo hoặc thanh toán thành công, Backend SHALL xóa key `ticket_inventory:<ticket_type_id>` trên Redis. Lần truy cập tiếp theo sẽ tự động load lại dữ liệu mới nhất từ DB.
+### 2. Thiáº¿t káº¿ CÆ¡ cháº¿ Redis Cache-aside cho VÃ© cÃ²n láº¡i
+Äá»ƒ giáº£m táº£i cho PostgreSQL khi hÃ ng ngÃ n ngÆ°á»i dÃ¹ng táº£i trang danh sÃ¡ch/chi tiáº¿t concert cÃ¹ng lÃºc:
+- **Key Pattern**: `ticket_inventory:<ticket_type_id>` lÆ°u giÃ¡ trá»‹ integer lÃ  sá»‘ vÃ© cÃ²n láº¡i.
+- **Luá»“ng Äá»c (Read)**:
+  1. Frontend gá»i API láº¥y sá»‘ vÃ© cÃ²n láº¡i.
+  2. Backend kiá»ƒm tra trÃªn Redis:
+     - *Náº¿u cÃ³ (Cache Hit)*: Tráº£ vá» káº¿t quáº£ ngay láº­p tá»©c.
+     - *Náº¿u khÃ´ng cÃ³ (Cache Miss)*: Query DB tÃ­nh sá»‘ vÃ© Ä‘Ã£ bÃ¡n (Tickets cÃ³ status `RESERVED` hoáº·c `BOOKED`). Sá»‘ vÃ© cÃ²n láº¡i = `totalQuantity` - `Sold`. LÆ°u giÃ¡ trá»‹ nÃ y vÃ o Redis vá»›i **TTL 30 giÃ¢y**.
+- **Luá»“ng Invalidate (Ghi/Huá»·)**:
+  - Khi má»™t giao dá»‹ch Ä‘áº·t vÃ© má»›i Ä‘Æ°á»£c táº¡o hoáº·c thanh toÃ¡n thÃ nh cÃ´ng, Backend SHALL xÃ³a key `ticket_inventory:<ticket_type_id>` trÃªn Redis. Láº§n truy cáº­p tiáº¿p theo sáº½ tá»± Ä‘á»™ng load láº¡i dá»¯ liá»‡u má»›i nháº¥t tá»« DB.
 
-### 3. Thuật toán kiểm tra Giới hạn mua của Khán giả (Per-user Limit)
-Mỗi lần người dùng gửi yêu cầu đặt $K$ vé loại `ticketTypeId`:
-1. Backend thực hiện đếm số lượng vé loại `ticketTypeId` mà `userId` đã mua thành công trong DB:
+### 3. Thuáº­t toÃ¡n kiá»ƒm tra Giá»›i háº¡n mua cá»§a KhÃ¡n giáº£ (Per-user Limit)
+Má»—i láº§n ngÆ°á»i dÃ¹ng gá»­i yÃªu cáº§u Ä‘áº·t $K$ vÃ© loáº¡i `ticketTypeId`:
+1. Backend thá»±c hiá»‡n Ä‘áº¿m sá»‘ lÆ°á»£ng vÃ© loáº¡i `ticketTypeId` mÃ  `userId` Ä‘Ã£ mua thÃ nh cÃ´ng trong DB:
    ```sql
    SELECT COUNT(*) FROM tickets t
    JOIN orders o ON t.orderId = o.id
-   WHERE o.userId = :userId 
+   WHERE o.userId = :userId
      AND t.ticketTypeId = :ticketTypeId
      AND o.status = 'PAID'
    ```
-2. Nếu `Số_vé_đã_mua + K > ticket_types.maxLimitPerUser`, Backend trả về lỗi và chặn giao dịch.
+2. Náº¿u `Sá»‘_vÃ©_Ä‘Ã£_mua + K > ticket_types.maxLimitPerUser`, Backend tráº£ vá» lá»—i vÃ  cháº·n giao dá»‹ch.
 
-### 4. Thiết kế Sơ đồ Chỗ ngồi SVG Tương tác ở Frontend
-- File sơ đồ chỗ ngồi định dạng `.svg` được thiết kế có cấu trúc nhóm `<g id="vip" class="seat-zone">` tương ứng với mã/tên phân hạng vé.
-- Next.js Frontend fetch file SVG từ `seatMapUrl`, render trực tiếp vào DOM (inline SVG).
-- Dùng Javascript lắng nghe sự kiện click trên các khu vực SVG có class `.seat-zone` để xác định khu vực được chọn và hiển thị form chọn số lượng tương ứng.
+### 4. Thiáº¿t káº¿ SÆ¡ Ä‘á»“ Chá»— ngá»“i SVG TÆ°Æ¡ng tÃ¡c á»Ÿ Frontend
+- File sÆ¡ Ä‘á»“ chá»— ngá»“i Ä‘á»‹nh dáº¡ng `.svg` Ä‘Æ°á»£c thiáº¿t káº¿ cÃ³ cáº¥u trÃºc nhÃ³m `<g id="vip" class="seat-zone">` tÆ°Æ¡ng á»©ng vá»›i mÃ£/tÃªn phÃ¢n háº¡ng vÃ©.
+- Next.js Frontend fetch file SVG tá»« `seatMapUrl`, render trá»±c tiáº¿p vÃ o DOM (inline SVG).
+- DÃ¹ng Javascript láº¯ng nghe sá»± kiá»‡n click trÃªn cÃ¡c khu vá»±c SVG cÃ³ class `.seat-zone` Ä‘á»ƒ xÃ¡c Ä‘á»‹nh khu vá»±c Ä‘Æ°á»£c chá»n vÃ  hiá»ƒn thá»‹ form chá»n sá»‘ lÆ°á»£ng tÆ°Æ¡ng á»©ng.
 
 ## Risks / Trade-offs
 
-- **[Risk 1: Cache stampede / Thủng cache]** → Khi cache hết hạn và có hàng ngàn request cùng lúc truy cập, hệ thống có thể bị quá tải DB do query dồn dập.
-  - *Mitigation*: Sử dụng cơ chế khóa mutex đơn giản trên bộ nhớ node hoặc thiết lập thời gian TTL ngẫu nhiên nhẹ (jitter) để tránh việc nhiều key cùng hết hạn một lúc.
-- **[Risk 2: Tranh chấp đặt vé (Race Condition)]** → Nhiều người dùng đặt vé cùng lúc dẫn đến số lượng vé thực tế trong DB bị âm (overselling).
-  - *Mitigation*: Sử dụng Prisma transaction cùng khóa bi quan (pessimistic lock hoặc `SELECT ... FOR UPDATE` thông qua `$queryRaw` của Prisma) khi thực hiện trừ kho số lượng vé trong DB.
+- **[Risk 1: Cache stampede / Thá»§ng cache]** â†’ Khi cache háº¿t háº¡n vÃ  cÃ³ hÃ ng ngÃ n request cÃ¹ng lÃºc truy cáº­p, há»‡ thá»‘ng cÃ³ thá»ƒ bá»‹ quÃ¡ táº£i DB do query dá»“n dáº­p.
+  - *Mitigation*: Sá»­ dá»¥ng cÆ¡ cháº¿ khÃ³a mutex Ä‘Æ¡n giáº£n trÃªn bá»™ nhá»› node hoáº·c thiáº¿t láº­p thá»i gian TTL ngáº«u nhiÃªn nháº¹ (jitter) Ä‘á»ƒ trÃ¡nh viá»‡c nhiá»u key cÃ¹ng háº¿t háº¡n má»™t lÃºc.
+- **[Risk 2: Tranh cháº¥p Ä‘áº·t vÃ© (Race Condition)]** â†’ Nhiá»u ngÆ°á»i dÃ¹ng Ä‘áº·t vÃ© cÃ¹ng lÃºc dáº«n Ä‘áº¿n sá»‘ lÆ°á»£ng vÃ© thá»±c táº¿ trong DB bá»‹ Ã¢m (overselling).
+  - *Mitigation*: Sá»­ dá»¥ng Prisma transaction cÃ¹ng khÃ³a bi quan (pessimistic lock hoáº·c `SELECT ... FOR UPDATE` thÃ´ng qua `$queryRaw` cá»§a Prisma) khi thá»±c hiá»‡n trá»« kho sá»‘ lÆ°á»£ng vÃ© trong DB.
