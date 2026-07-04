@@ -92,7 +92,25 @@ function createLocalId() {
 }
 
 function normalizeBaseUrl(value: string) {
-  return value.trim().replace(/\/+$/, '');
+  let normalized = value.trim();
+
+  if (!normalized) {
+    throw new Error('Vui lòng nhập API base URL.');
+  }
+
+  normalized = normalized.replace(/^http:\/*/i, 'http://').replace(/^https:\/*/i, 'https://');
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+
+  normalized = normalized.replace(/\/+$/, '');
+
+  try {
+    return new URL(normalized).toString().replace(/\/+$/, '');
+  } catch {
+    throw new Error('API base URL không hợp lệ. Ví dụ đúng: http://192.168.1.5:3000/api/v1');
+  }
 }
 
 function statusCopy(status: ScanStatus) {
@@ -225,11 +243,15 @@ export default function App() {
   }, []);
 
   const saveApiBaseUrl = async () => {
-    const normalized = normalizeBaseUrl(draftApiBaseUrl);
-    setApiBaseUrl(normalized);
-    setDraftApiBaseUrl(normalized);
-    await AsyncStorage.setItem(API_BASE_URL_STORAGE_KEY, normalized);
-    setLastMessage('Đã lưu API base URL.');
+    try {
+      const normalized = normalizeBaseUrl(draftApiBaseUrl);
+      setApiBaseUrl(normalized);
+      setDraftApiBaseUrl(normalized);
+      await AsyncStorage.setItem(API_BASE_URL_STORAGE_KEY, normalized);
+      setLastMessage('Đã lưu API base URL.');
+    } catch (error) {
+      Alert.alert('API URL không hợp lệ', error instanceof Error ? error.message : 'Vui lòng kiểm tra lại API URL.');
+    }
   };
 
   const login = async () => {

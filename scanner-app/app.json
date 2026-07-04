@@ -11,8 +11,11 @@
     },
     "android": {
       "package": "com.ticketbox.scanner",
+      "usesCleartextTraffic": true,
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -35,7 +38,11 @@
       ]
     ],
     "extra": {
-      "apiBaseUrl": "http://localhost:3000/api/v1"
-    }
+      "apiBaseUrl": "http://localhost:3000/api/v1",
+      "eas": {
+        "projectId": "aac70faf-55ae-4fc0-a78b-2bc3c1af020d"
+      }
+    },
+    "owner": "ninhbilly123s-team"
   }
 }

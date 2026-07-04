@@ -251,6 +251,10 @@ export class CheckinService {
   /**
    * Đồng bộ dữ liệu offline từ client lên
    */
+  /**
+   * Dong bo du lieu offline tu client len.
+   * Dung chung scanTicket de ho tro ca ve thuong va QR khach VIP.
+   */
   public async syncOfflineLogs(params: {
     concertId: string;
     deviceId: string;
@@ -259,7 +263,6 @@ export class CheckinService {
   }) {
     const { concertId, deviceId, logs, gateStaffId } = params;
 
-    // Sắp xếp các lượt quét theo thời gian tăng dần (First-Scan Wins)
     const sortedLogs = [...logs].sort(
       (a, b) => new Date(a.scannedAtLocal).getTime() - new Date(b.scannedAtLocal).getTime()
     );
@@ -270,101 +273,30 @@ export class CheckinService {
 
     for (const log of sortedLogs) {
       try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(log.ticketId);
-        const ticket = await prisma.ticket.findFirst({
-          where: {
-            OR: [
-              ...(isUuid ? [{ id: log.ticketId }] : []),
-              { qrCode: log.ticketId },
-            ],
-          },
-          include: {
-            orderItem: {
-              include: {
-                ticketType: true,
-              },
-            },
-          },
+        const result = await this.scanTicket({
+          ticketId: log.ticketId,
+          deviceId,
+          scannedAtLocal: log.scannedAtLocal,
+          concertId,
+          gateStaffId,
         });
 
-        if (!ticket) {
-          conflicts.push({
-            ticketId: log.ticketId,
-            scannedAtLocal: log.scannedAtLocal,
-            reason: 'Vé không tồn tại trong hệ thống (INVALID_TICKET)',
-          });
-          conflictCount++;
-          continue;
-        }
-
-        if (ticket.orderItem.ticketType.concertId !== concertId) {
-          conflicts.push({
-            ticketId: log.ticketId,
-            scannedAtLocal: log.scannedAtLocal,
-            reason: 'WRONG_CONCERT',
-          });
-          conflictCount++;
-          continue;
-        }
-
-        // Kiểm tra xem đã có log thành công nào của vé này trong database chưa
-        const alreadyCheckedIn = await prisma.checkinLog.findFirst({
-          where: {
-            ticketId: ticket.id,
-            synced: true,
-          },
-        });
-
-        if (alreadyCheckedIn) {
-          // Tranh chấp xảy ra! Lưu vết log offline bị trùng làm bằng chứng
-          await prisma.checkinLog.create({
-            data: {
-              ticketId: ticket.id,
-              gateStaffId,
-              deviceId,
-              synced: false, // synced = false đánh dấu tranh chấp/lỗi
-              scannedAtLocal: new Date(log.scannedAtLocal),
-              syncedAt: null, // Chưa và không bao giờ sync thành công
-            },
-          });
-
-          conflicts.push({
-            ticketId: log.ticketId,
-            scannedAtLocal: log.scannedAtLocal,
-            reason: `Vé đã được quét trước đó vào lúc ${alreadyCheckedIn.scannedAtLocal.toISOString()} bởi thiết bị ${alreadyCheckedIn.deviceId}`,
-          });
-          conflictCount++;
-        } else {
-          // Chưa có ai quét: Ghi nhận checkin thành công
-          await prisma.$transaction(async (tx) => {
-            await tx.checkinLog.create({
-              data: {
-                ticketId: ticket.id,
-                gateStaffId,
-                deviceId,
-                synced: true,
-                scannedAtLocal: new Date(log.scannedAtLocal),
-                syncedAt: new Date(),
-              },
-            });
-
-            await tx.ticket.update({
-              where: { id: ticket.id },
-              data: {
-                status: 'used',
-                usedAt: new Date(log.scannedAtLocal),
-              },
-            });
-          });
-
+        if (result.status === 'VALID') {
           syncedCount++;
+        } else {
+          conflicts.push({
+            ticketId: log.ticketId,
+            scannedAtLocal: log.scannedAtLocal,
+            reason: result.status,
+          });
+          conflictCount++;
         }
       } catch (err: any) {
         console.error(`[Checkin Service] Error syncing log for ticket ${log.ticketId}:`, err);
         conflicts.push({
           ticketId: log.ticketId,
           scannedAtLocal: log.scannedAtLocal,
-          reason: `Lỗi hệ thống: ${err.message}`,
+          reason: `Loi he thong: ${err.message}`,
         });
         conflictCount++;
       }
@@ -376,6 +308,7 @@ export class CheckinService {
       conflicts,
     };
   }
+
 
   /**
    * Tìm kiếm danh sách khách VIP kèm trạng thái vé của họ

@@ -200,12 +200,12 @@ export async function holdOrder(params: {
   quantity: number;
   accessToken: string;
   checkoutToken?: string;
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }): Promise<HoldOrderResponse> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${params.accessToken}`,
-    'Idempotency-Key': params.idempotencyKey || `hold-${params.concertId}-${Date.now()}`,
+    'Idempotency-Key': params.idempotencyKey,
   };
   if (params.checkoutToken) {
     headers['Checkout-Token'] = params.checkoutToken;

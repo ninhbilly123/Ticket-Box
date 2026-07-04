@@ -25,6 +25,7 @@ import { startWaitingRoomWorker } from './workers/waiting-room.worker';
 import { startAiBioWorker } from './workers/ai-bio.worker';
 import { startVipGuestSyncWorker } from './workers/vip-guest-sync.worker';
 import { startEmailWorker } from './workers/email.worker';
+import { startConcertReminderWorker } from './workers/concert-reminder.worker';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,6 +71,7 @@ export function startServer() {
     startAiBioWorker();
     startEmailWorker();
     startVipGuestSyncWorker();
+    startConcertReminderWorker();
   });
 }
 

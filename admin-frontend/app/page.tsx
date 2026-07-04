@@ -11,7 +11,6 @@ import {
   Check,
   ClipboardList,
   LogOut,
-  MailCheck,
   RefreshCw,
   Shield,
   Ticket,
@@ -25,7 +24,6 @@ import {
   StaffUser,
   StaffAssignment,
   TicketType,
-  WhitelistConfig,
   ADMIN_SESSION_CHANGED_EVENT,
   adminApi,
   clearStoredAdminSession,
@@ -37,14 +35,13 @@ import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integra
 import ConcertSetup from '../components/concert-setup';
 import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
-type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'whitelist' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
+type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'overview', label: 'Tổng quan', icon: BarChart3 },
   { key: 'concerts', label: 'Sự kiện', icon: CalendarClock },
   { key: 'tickets', label: 'Loại vé', icon: Ticket },
   { key: 'staff', label: 'Nhân viên', icon: Users },
-  { key: 'whitelist', label: 'Email cho phép', icon: MailCheck },
   { key: 'sponsors', label: 'Email nhãn hàng', icon: Building2 },
   { key: 'ai-bio', label: 'Tiểu sử nghệ sĩ AI', icon: BrainCircuit },
   { key: 'vip-sync', label: 'Đồng bộ khách VIP', icon: RefreshCw },
@@ -72,14 +69,6 @@ const emptyTicketTypeForm = {
   saleCloseAt: '',
 };
 
-const emptyWhitelistForm = {
-  mailboxAddress: 'vip-import@ticketbox.local',
-  allowedSenderEmail: 'sponsor@example.com',
-  subjectKeyword: 'VIP CSV',
-  concertId: '',
-  organizationId: '',
-};
-
 const emptyStaffUserForm = {
   email: '',
   fullName: '',
@@ -99,7 +88,6 @@ export default function AdminHomePage() {
   const [selectedConcertId, setSelectedConcertId] = useState('');
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
-  const [whitelistConfigs, setWhitelistConfigs] = useState<WhitelistConfig[]>([]);
   const [revenue, setRevenue] = useState<RevenueSummary | null>(null);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
 
@@ -109,7 +97,6 @@ export default function AdminHomePage() {
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);
   const [staffForm, setStaffForm] = useState({ staffId: '', gateId: 'GATE-A' });
   const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
-  const [whitelistForm, setWhitelistForm] = useState(emptyWhitelistForm);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Ban tổ chức hủy sự kiện');
 
@@ -166,13 +153,11 @@ export default function AdminHomePage() {
     setLoading(true);
     setError(null);
     try {
-      const [concertList, whitelistList, staffList] = await Promise.all([
+      const [concertList, staffList] = await Promise.all([
         adminApi.listConcerts(token),
-        adminApi.listWhitelistConfigs(token),
         adminApi.listStaff(token),
       ]);
       setConcerts(concertList);
-      setWhitelistConfigs(whitelistList);
       setStaffUsers(staffList);
       if (!selectedConcertId && concertList[0]) {
         setSelectedConcertId(concertList[0].id);
@@ -802,62 +787,6 @@ export default function AdminHomePage() {
               </form>
             </Panel>
           </div>
-        </div>
-      );
-    }
-
-    if (activeTab === 'whitelist') {
-      return (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
-          <Panel title="Cấu hình email cho phép">
-            <DataTable
-              headers={['Hộp thư', 'Người gửi', 'Từ khóa', 'Phạm vi', 'Trạng thái']}
-              rows={whitelistConfigs.map((item) => [
-                item.mailboxAddress,
-                item.allowedSenderEmail,
-                item.subjectKeyword,
-                item.concert?.name || item.organization?.name || item.organizationId,
-                formatStatusLabel(item.status),
-              ])}
-              actions={whitelistConfigs.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => runMutation(() => adminApi.deleteWhitelistConfig(token, item.id), 'Đã xóa cấu hình email cho phép.')}
-                  className="danger-small-button"
-                  type="button"
-                >
-                  Xóa
-                </button>
-              ))}
-            />
-          </Panel>
-          <Panel title="Tạo cấu hình email cho phép">
-            <form
-              className="space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void runMutation(
-                  () =>
-                    adminApi.createWhitelistConfig(token, {
-                      mailboxAddress: whitelistForm.mailboxAddress,
-                      allowedSenderEmail: whitelistForm.allowedSenderEmail,
-                      subjectKeyword: whitelistForm.subjectKeyword,
-                      concertId: whitelistForm.concertId || selectedConcert?.id || undefined,
-                      organizationId: whitelistForm.organizationId || session!.user.organizationId || undefined,
-                    }),
-                  'Đã tạo cấu hình email cho phép.'
-                );
-              }}
-            >
-              <TextInput label="Hộp thư" value={whitelistForm.mailboxAddress} onChange={(value) => setWhitelistForm({ ...whitelistForm, mailboxAddress: value })} />
-              <TextInput label="Email người gửi được phép" value={whitelistForm.allowedSenderEmail} onChange={(value) => setWhitelistForm({ ...whitelistForm, allowedSenderEmail: value })} />
-              <TextInput label="Từ khóa tiêu đề" value={whitelistForm.subjectKeyword} onChange={(value) => setWhitelistForm({ ...whitelistForm, subjectKeyword: value })} />
-              <button disabled={saving} className="primary-button w-full" type="submit">
-                <MailCheck className="h-4 w-4" />
-                Tạo cấu hình
-              </button>
-            </form>
-          </Panel>
         </div>
       );
     }

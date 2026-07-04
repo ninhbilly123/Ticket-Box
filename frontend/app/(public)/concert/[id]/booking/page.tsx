@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -82,6 +82,7 @@ export default function ConcertDetailPage() {
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [history, setHistory] = useState<TicketHistoryItem[]>([]);
+  const holdIdempotencyKeyRef = useRef<string | null>(null);
 
   const selectedTicketType = useMemo(
     () => concert?.ticketTypes.find((ticketType) => ticketType.id === selectedTicketTypeId) || null,
@@ -94,6 +95,17 @@ export default function ConcertDetailPage() {
 
   const paidTickets = orderSnapshot?.tickets || [];
   const orderStatus = orderSnapshot?.order.status || holdResult?.orderStatus;
+
+  function resetHoldIdempotencyKey() {
+    holdIdempotencyKeyRef.current = null;
+  }
+
+  function getHoldIdempotencyKey() {
+    if (!holdIdempotencyKeyRef.current) {
+      holdIdempotencyKeyRef.current = `hold-${concertId}-${selectedTicketTypeId || 'none'}-${quantity}-${crypto.randomUUID()}`;
+    }
+    return holdIdempotencyKeyRef.current;
+  }
 
   async function loadConcert(showSpinner = true) {
     if (showSpinner) setLoading(true);
@@ -249,7 +261,7 @@ export default function ConcertDetailPage() {
         quantity,
         accessToken: activeSession.accessToken,
         checkoutToken,
-        idempotencyKey: `hold-${concert.id}-${selectedTicketType.id}-${Date.now()}`,
+        idempotencyKey: getHoldIdempotencyKey(),
       });
 
       setHoldResult(result);
@@ -319,6 +331,7 @@ export default function ConcertDetailPage() {
   }
 
   function resetCheckout() {
+    resetHoldIdempotencyKey();
     setHoldResult(null);
     setOrderSnapshot(null);
     setPaymentUrl(null);
@@ -493,7 +506,10 @@ export default function ConcertDetailPage() {
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                        onClick={() => {
+                          setQuantity(Math.max(1, quantity - 1));
+                          resetCheckout();
+                        }}
                         className="w-8 h-8 flex items-center justify-center rounded bg-gray-800 text-white hover:bg-gray-700 font-bold"
                       >
                         -
@@ -501,7 +517,10 @@ export default function ConcertDetailPage() {
                       <span className="w-10 text-center font-bold">{quantity}</span>
                       <button
                         type="button"
-                        onClick={() => setQuantity(Math.min(maxSelectableQuantity, quantity + 1))}
+                        onClick={() => {
+                          setQuantity(Math.min(maxSelectableQuantity, quantity + 1));
+                          resetCheckout();
+                        }}
                         className="w-8 h-8 flex items-center justify-center rounded bg-gray-800 text-white hover:bg-gray-700 font-bold"
                       >
                         +

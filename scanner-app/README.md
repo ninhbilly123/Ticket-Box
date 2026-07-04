@@ -1,25 +1,47 @@
 # TicketBox Scanner App
 
-Ứng dụng Expo React Native dành cho nhân viên soát vé (`CHECKIN_STAFF`).
+Ung dung Expo React Native danh cho nhan vien soat ve (`CHECKIN_STAFF`).
 
-## Chạy dev bằng Expo Go
+## Luu y quan trong khi test tren dien thoai
 
-1. Chạy backend TicketBox ở laptop:
+Khong dung:
+
+```text
+http://localhost:3000/api/v1
+```
+
+Tren dien thoai that, `localhost` la chinh dien thoai, khong phai laptop dang chay backend.
+
+Hay dung IP LAN cua laptop:
+
+```text
+http://<IP-LAN-cua-laptop>:3000/api/v1
+```
+
+Vi du:
+
+```text
+http://192.168.1.10:3000/api/v1
+```
+
+APK da cau hinh `android.usesCleartextTraffic=true` de cho phep goi HTTP local khi demo. Sau khi sua cau hinh nay phai build lai APK, APK cu khong tu cap nhat.
+
+## Chay backend
 
 ```bash
 cd ../backend
 npm run dev
 ```
 
-2. Lấy IP LAN của laptop:
+Backend dang listen `0.0.0.0:3000`, nen dien thoai cung Wi-Fi co the goi qua IP LAN cua laptop.
 
-```powershell
-ipconfig
-```
+Neu dien thoai khong ket noi duoc:
 
-Chọn IPv4 của Wi-Fi, ví dụ `192.168.1.10`.
+- Kiem tra laptop va dien thoai cung mang Wi-Fi.
+- Kiem tra Windows Firewall co chan port `3000` khong.
+- Thu mo tren trinh duyet dien thoai: `http://<IP-LAN>:3000/health`.
 
-3. Chạy scanner app:
+## Chay dev bang Expo Go
 
 ```bash
 cd ../scanner-app
@@ -27,49 +49,37 @@ npm install
 npm start
 ```
 
-4. Cài app **Expo Go** trên điện thoại Android, quét QR của Expo terminal.
+Mo Expo Go tren dien thoai va quet QR trong terminal.
 
-5. Trong màn hình đăng nhập của Scanner App, nhập API base URL:
+Trong man hinh dang nhap cua Scanner App:
+
+1. Nhap API base URL bang IP LAN cua laptop.
+2. Bam `Luu API URL`.
+3. Dang nhap bang tai khoan role `CHECKIN_STAFF`.
+
+## Test bang APK
+
+Neu da cai APK cu, nen go app hoac xoa data app truoc khi cai ban moi de tranh con luu API URL cu la `localhost`.
+
+Build APK:
+
+```bash
+npx eas login
+npx eas init
+npm run build:apk
+```
+
+Tai APK moi tu link EAS, cai vao Android, sau do nhap API base URL bang IP LAN cua laptop:
 
 ```text
 http://<IP-LAN-cua-laptop>:3000/api/v1
 ```
 
-Ví dụ:
-
-```text
-http://192.168.1.10:3000/api/v1
-```
-
-Không dùng `localhost` trên điện thoại thật vì `localhost` sẽ trỏ về chính điện thoại.
-
 ## Test nhanh
 
-- Đăng nhập bằng tài khoản role `CHECKIN_STAFF`.
-- App sẽ tải các concert/gate được phân công.
-- Chọn concert/gate.
-- Bấm `Mở camera quét QR` hoặc nhập mã thủ công.
-- Tắt Wi-Fi/mobile data để test offline queue.
-- Bật mạng lại và bấm `Đồng bộ lượt offline`.
-
-## Build APK
-
-Đăng nhập EAS:
-
-```bash
-npx eas login
-```
-
-Liên kết/tạo project EAS:
-
-```bash
-npx eas init
-```
-
-Build APK profile preview:
-
-```bash
-npm run build:apk
-```
-
-Sau khi build xong, EAS sẽ trả link tải APK để cài trên Android.
+- Dang nhap bang tai khoan role `CHECKIN_STAFF`.
+- App tai cac concert/gate duoc phan cong.
+- Chon concert/gate.
+- Bam `Mo camera quet QR` hoac nhap ma thu cong.
+- Tat Wi-Fi/mobile data de test offline queue.
+- Bat mang lai va bam `Dong bo luot offline`.
