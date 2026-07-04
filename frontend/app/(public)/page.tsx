@@ -173,7 +173,7 @@ export default function ConcertListingPage() {
               Xóa bộ lọc
             </button>
             <button
-              onClick={loadConcerts}
+              onClick={() => loadConcerts()}
               className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/30 hover:bg-indigo-950 hover:text-white transition-all py-2 px-3 rounded-lg text-xs flex items-center gap-1.5 font-medium"
             >
               <RefreshCw className="w-3.5 h-3.5" />
@@ -192,7 +192,7 @@ export default function ConcertListingPage() {
           <div className="bg-red-950/20 border border-red-900/50 p-6 rounded-2xl text-center max-w-md mx-auto my-10 text-red-200">
             <p className="font-semibold mb-2">Đã xảy ra lỗi</p>
             <p className="text-sm text-red-300/80 mb-4">{error}</p>
-            <button onClick={loadConcerts} className="bg-red-900 hover:bg-red-800 text-white text-xs px-4 py-2 rounded-lg">
+            <button onClick={() => loadConcerts()} className="bg-red-900 hover:bg-red-800 text-white text-xs px-4 py-2 rounded-lg">
               Thử lại
             </button>
           </div>

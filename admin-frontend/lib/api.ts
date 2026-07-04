@@ -4,10 +4,12 @@ const getApiBaseUrl = () => {
   }
 
   if (typeof window !== 'undefined') {
-    return `http://${window.location.hostname}:3000/api/v1`;
+    const hostname = window.location.hostname;
+    const apiHost = hostname === 'localhost' || hostname === '::1' ? '127.0.0.1' : hostname;
+    return `http://${apiHost}:3000/api/v1`;
   }
 
-  return 'http://localhost:3000/api/v1';
+  return 'http://127.0.0.1:3000/api/v1';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -467,6 +469,13 @@ export const adminApi = {
     return apiRequest<{ revoked: boolean }>('/auth/logout', {
       method: 'POST',
       body: JSON.stringify({ refreshToken }),
+    });
+  },
+  changePassword(token: string, payload: { currentPassword: string; newPassword: string }) {
+    return apiRequest<{ changed: boolean }>('/auth/change-password', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(payload),
     });
   },
   listConcerts(token: string) {

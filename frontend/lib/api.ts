@@ -1,10 +1,17 @@
 const getApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+
   if (typeof window !== 'undefined') {
     // Client-side: tự động lấy IP/hostname của máy tính chạy backend
-    return `http://${window.location.hostname}:3000/api/v1`;
+    const hostname = window.location.hostname;
+    const apiHost = hostname === 'localhost' || hostname === '::1' ? '127.0.0.1' : hostname;
+    return `http://${apiHost}:3000/api/v1`;
   }
+
   // Server-side (Next.js SSR/build)
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+  return 'http://127.0.0.1:3000/api/v1';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -145,6 +152,38 @@ export async function fetchCurrentUser(accessToken: string): Promise<AuthSession
     cache: 'no-store',
   });
   const json = await readApiJson(res, 'Cannot load profile');
+  return json.data;
+}
+
+export async function updateProfile(
+  accessToken: string,
+  payload: { fullName?: string; phone?: string | null }
+): Promise<AuthSession['user']> {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const json = await readApiJson(res, 'Không thể cập nhật hồ sơ');
+  return json.data;
+}
+
+export async function changePassword(
+  accessToken: string,
+  payload: { currentPassword: string; newPassword: string }
+): Promise<{ changed: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const json = await readApiJson(res, 'Không thể đổi mật khẩu');
   return json.data;
 }
 

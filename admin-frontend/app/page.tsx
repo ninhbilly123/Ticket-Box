@@ -10,6 +10,7 @@ import {
   CalendarClock,
   Check,
   ClipboardList,
+  KeyRound,
   LogOut,
   RefreshCw,
   Shield,
@@ -97,6 +98,10 @@ export default function AdminHomePage() {
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);
   const [staffForm, setStaffForm] = useState({ staffId: '', gateId: 'GATE-A' });
   const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Ban tổ chức hủy sự kiện');
 
@@ -218,6 +223,38 @@ export default function AdminHomePage() {
     setSelectedConcertId('');
   }
 
+  async function handleStaffPasswordChange(event: FormEvent) {
+    event.preventDefault();
+    if (!token) return;
+
+    setPasswordError(null);
+    setPasswordNotice(null);
+
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordError('Mật khẩu mới phải có ít nhất 8 ký tự.');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('Xác nhận mật khẩu không khớp.');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await adminApi.changePassword(token, {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setPasswordNotice('Đã đổi mật khẩu.');
+    } catch (err) {
+      setPasswordError(getErrorMessage(err));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   async function runMutation(action: () => Promise<unknown>, successMessage: string) {
     setSaving(true);
     setError(null);
@@ -255,11 +292,6 @@ export default function AdminHomePage() {
                 <p className="text-sm uppercase tracking-[0.24em] text-cyan-300">Hệ thống vận hành</p>
                 <h2 className="mt-4 text-4xl font-semibold leading-tight">Quản trị sự kiện và vận hành cổng soát vé.</h2>
               </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-xs text-slate-300">
-              <Metric label="Vai trò" value="3" />
-              <Metric label="Cổng mạng" value="3002" />
-              <Metric label="API" value="3000" />
             </div>
           </section>
 
@@ -324,6 +356,40 @@ export default function AdminHomePage() {
               <span className="font-mono text-xs">http://IP-LAPTOP:3000/api/v1</span>.
             </p>
           </div>
+
+          <form onSubmit={handleStaffPasswordChange} className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-cyan-700" />
+              <h2 className="font-semibold text-slate-900">Đổi mật khẩu</h2>
+            </div>
+            <TextInput
+              label="Mật khẩu hiện tại"
+              required
+              type="password"
+              value={passwordForm.currentPassword}
+              onChange={(value) => setPasswordForm({ ...passwordForm, currentPassword: value })}
+            />
+            <TextInput
+              label="Mật khẩu mới"
+              required
+              type="password"
+              value={passwordForm.newPassword}
+              onChange={(value) => setPasswordForm({ ...passwordForm, newPassword: value })}
+            />
+            <TextInput
+              label="Xác nhận mật khẩu mới"
+              required
+              type="password"
+              value={passwordForm.confirmPassword}
+              onChange={(value) => setPasswordForm({ ...passwordForm, confirmPassword: value })}
+            />
+            {passwordError && <Alert message={passwordError} />}
+            {passwordNotice && <Success message={passwordNotice} />}
+            <button disabled={changingPassword} className="primary-button w-full" type="submit">
+              <KeyRound className="h-4 w-4" />
+              {changingPassword ? 'Đang đổi mật khẩu...' : 'Đổi mật khẩu'}
+            </button>
+          </form>
 
           <button onClick={handleLogout} className="secondary-button mt-6 w-full" type="button">
             <LogOut className="h-4 w-4" />
@@ -848,15 +914,6 @@ function getErrorMessage(error: unknown) {
 function formatDate(value?: string | null) {
   if (!value) return '-';
   return new Date(value).toLocaleString('vi-VN');
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-white/10 bg-white/5 p-3">
-      <div className="text-lg font-semibold text-white">{value}</div>
-      <div className="text-slate-400">{label}</div>
-    </div>
-  );
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

@@ -100,6 +100,48 @@ export class AuthService {
     return this.toPublicUser(latest);
   }
 
+  public async updateProfile(user: AuthUser, input: {
+    fullName?: string;
+    phone?: string | null;
+  }) {
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(typeof input.fullName === 'string' ? { fullName: input.fullName.trim() } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone?.trim() || null } : {}),
+      },
+    });
+
+    return this.toPublicUser(updated);
+  }
+
+  public async changePassword(user: AuthUser, input: {
+    currentPassword: string;
+    newPassword: string;
+  }) {
+    const latest = await prisma.user.findUnique({ where: { id: user.id } });
+    if (!latest) {
+      throw new AppError(404, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    const validPassword = await bcrypt.compare(input.currentPassword, latest.passwordHash);
+    if (!validPassword) {
+      throw new AppError(400, 'AUTH_CURRENT_PASSWORD_INVALID', 'Current password is incorrect.');
+    }
+
+    if (input.currentPassword === input.newPassword) {
+      throw new AppError(400, 'AUTH_PASSWORD_UNCHANGED', 'New password must be different from the current password.');
+    }
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    return { changed: true };
+  }
+
   public async refresh(refreshToken: string) {
     const tokenHash = this.hashToken(refreshToken);
     const stored = await prisma.refreshToken.findUnique({

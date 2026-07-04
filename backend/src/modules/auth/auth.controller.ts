@@ -20,6 +20,18 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
+const updateProfileSchema = z.object({
+  fullName: z.string().trim().min(1).max(120).optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+}).refine((data) => data.fullName !== undefined || data.phone !== undefined, {
+  message: 'At least one profile field is required.',
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: passwordSchema,
+});
+
 export class AuthController {
   public async register(req: Request, res: Response, next: NextFunction) {
     try {
@@ -64,6 +76,26 @@ export class AuthController {
   public async me(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await authService.me(req.user!);
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  public async updateProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const dto = updateProfileSchema.parse(req.body);
+      const result = await authService.updateProfile(req.user!, dto);
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  public async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const dto = changePasswordSchema.parse(req.body);
+      const result = await authService.changePassword(req.user!, dto);
       return res.status(200).json({ success: true, data: result });
     } catch (error) {
       return next(error);
