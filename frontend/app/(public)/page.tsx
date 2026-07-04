@@ -17,15 +17,25 @@ export default function ConcertListingPage() {
   const [date, setDate] = useState('');
 
   // Load concerts
-  const loadConcerts = async () => {
+  const loadConcerts = async (overrides?: {
+    search?: string;
+    artist?: string;
+    location?: string;
+    date?: string;
+  }) => {
     setLoading(true);
     setError(null);
     try {
+      const currentSearch = overrides && 'search' in overrides ? overrides.search : search;
+      const currentArtist = overrides && 'artist' in overrides ? overrides.artist : artist;
+      const currentLoc = overrides && 'location' in overrides ? overrides.location : location;
+      const currentDate = overrides && 'date' in overrides ? overrides.date : date;
+
       const data = await fetchConcerts({
-        search: search || undefined,
-        artist: artist || undefined,
-        location: location || undefined,
-        date: date || undefined,
+        search: currentSearch || undefined,
+        artist: currentArtist || undefined,
+        location: currentLoc || undefined,
+        date: currentDate || undefined,
       });
       setConcerts(data);
     } catch (err: any) {
@@ -37,7 +47,7 @@ export default function ConcertListingPage() {
 
   useEffect(() => {
     loadConcerts();
-  }, [artist, location, date]); // Auto-fetch on drop-down filter change
+  }, []); // Run once on mount
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,10 +59,13 @@ export default function ConcertListingPage() {
     setArtist('');
     setLocation('');
     setDate('');
-    // Trigger reloading
-    setTimeout(() => {
-      loadConcerts();
-    }, 50);
+    // Load immediately with cleared values
+    loadConcerts({
+      search: '',
+      artist: '',
+      location: '',
+      date: '',
+    });
   };
 
   return (
@@ -104,30 +117,51 @@ export default function ConcertListingPage() {
             {/* Artist filter */}
             <select
               value={artist}
-              onChange={(e) => setArtist(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setArtist(val);
+                loadConcerts({ artist: val });
+              }}
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
               <option value="">-- Tất cả nghệ sĩ --</option>
-              <option value="Sơn Tùng M-TP">Sơn Tùng M-TP</option>
+              <option value="Son Tung M-TP">Sơn Tùng M-TP</option>
+              <option value="Den Vau">Đen Vâu</option>
+              <option value="My Tam">Mỹ Tâm</option>
+              <option value="Hoang Thuy Linh">Hoàng Thùy Linh</option>
             </select>
 
             {/* Location filter */}
             <select
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setLocation(val);
+                loadConcerts({ location: val });
+              }}
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
               <option value="">-- Tất cả địa điểm --</option>
-              <option value="Hà Nội">Hà Nội</option>
-              <option value="Hồ Chí Minh">Hồ Chí Minh</option>
+              <option value="Ha Noi">Hà Nội</option>
+              <option value="HCM">TP. Hồ Chí Minh</option>
             </select>
 
             {/* Date filter */}
             <input
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
+              onChange={(e) => {
+                const val = e.target.value;
+                setDate(val);
+                loadConcerts({ date: val });
+              }}
+              onClick={(e) => {
+                try {
+                  e.currentTarget.showPicker();
+                } catch {}
+              }}
+              style={{ colorScheme: 'dark' }}
+              className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
             />
           </div>
 

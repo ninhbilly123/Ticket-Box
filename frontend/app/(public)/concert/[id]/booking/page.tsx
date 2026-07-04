@@ -133,6 +133,12 @@ export default function ConcertDetailPage() {
   }, [concertId]);
 
   useEffect(() => {
+    if (session) {
+      loadHistory(session);
+    }
+  }, [session]);
+
+  useEffect(() => {
     if (!session || waitingStatus?.status !== 'WAITING') return;
 
     const timer = window.setInterval(async () => {
@@ -428,32 +434,6 @@ export default function ConcertDetailPage() {
               <ShoppingCart className="w-5 h-5 text-indigo-400" />
               Đặt vé
             </h2>
-
-            <div className="mb-6 rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs text-gray-500 uppercase font-bold">Tài khoản</p>
-                  <p className="text-sm font-semibold text-white">
-                    {session ? session.user.email : authStatus === 'loading' ? 'Đang kiểm tra phiên...' : 'Chưa đăng nhập'}
-                  </p>
-                </div>
-                {session ? (
-                  <Link
-                    href="/profile"
-                    className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white flex items-center"
-                  >
-                    Hồ sơ
-                  </Link>
-                ) : (
-                  <Link
-                    href={`/login?redirect=${encodeURIComponent(`/concert/${concert.id}/booking`)}`}
-                    className="h-9 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center"
-                  >
-                    Đăng nhập
-                  </Link>
-                )}
-              </div>
-            </div>
 
             <form onSubmit={handleHoldOrder} className="space-y-5">
               <div>
