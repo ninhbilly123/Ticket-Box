@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -37,6 +37,8 @@ const emptySponsorForm = {
   allowedEventCodes: [] as string[],
 };
 
+const VIP_REPORT_PAGE_SIZE = 8;
+
 export function SponsorEmailTab({ token, concerts }: IntegrationProps) {
   const [sponsors, setSponsors] = useState<SponsorEmail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +63,12 @@ export function SponsorEmailTab({ token, concerts }: IntegrationProps) {
   useEffect(() => {
     void loadSponsors();
   }, [loadSponsors]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   function beginEdit(sponsor: SponsorEmail) {
     setEditingId(sponsor.id);
@@ -295,6 +303,12 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
     return () => window.clearInterval(timer);
   }, [artistBio?.id, artistBio?.status, artistBio?.concertId, loadArtistBio]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   function selectFile(nextFile: File | null) {
     setError(null);
     if (!nextFile) {
@@ -491,6 +505,25 @@ export function VipSyncTab({ token }: IntegrationProps) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [reportQuery, setReportQuery] = useState('');
+  const [reportStatusFilter, setReportStatusFilter] = useState('ALL');
+  const [reportPage, setReportPage] = useState(1);
+  const filteredReports = useMemo(() => {
+    const query = normalizeSearch(reportQuery);
+    return reports
+      .filter((report) => {
+        const matchesQuery =
+          !query ||
+          normalizeSearch(report.senderEmail || '').includes(query) ||
+          normalizeSearch(report.originalFileName || '').includes(query) ||
+          normalizeSearch(report.errorMessage || '').includes(query);
+        const matchesStatus = reportStatusFilter === 'ALL' || report.status === reportStatusFilter;
+        return matchesQuery && matchesStatus;
+      })
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }, [reportQuery, reportStatusFilter, reports]);
+  const reportPageCount = Math.max(1, Math.ceil(filteredReports.length / VIP_REPORT_PAGE_SIZE));
+  const pagedReports = paginate(filteredReports, reportPage, VIP_REPORT_PAGE_SIZE);
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -507,6 +540,14 @@ export function VipSyncTab({ token }: IntegrationProps) {
   useEffect(() => {
     void loadReports();
   }, [loadReports]);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [reportQuery, reportStatusFilter]);
+
+  useEffect(() => {
+    if (reportPage > reportPageCount) setReportPage(reportPageCount);
+  }, [reportPage, reportPageCount]);
 
   useEffect(() => {
     if (!selectedReportId) {
@@ -540,6 +581,20 @@ export function VipSyncTab({ token }: IntegrationProps) {
           </button>
         }
       >
+        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
+          <input
+            className="input"
+            onChange={(event) => setReportQuery(event.target.value)}
+            placeholder="Tìm người gửi, tên file hoặc lỗi"
+            value={reportQuery}
+          />
+          <select className="select" onChange={(event) => setReportStatusFilter(event.target.value)} value={reportStatusFilter}>
+            <option value="ALL">Tất cả trạng thái</option>
+            {Array.from(new Set(reports.map((report) => report.status))).map((status) => (
+              <option key={status} value={status}>{formatStatusLabel(status)}</option>
+            ))}
+          </select>
+        </div>
         {loading ? (
           <LoadingState text="Đang tải báo cáo đồng bộ..." />
         ) : reports.length === 0 ? (
@@ -561,7 +616,7 @@ export function VipSyncTab({ token }: IntegrationProps) {
                 </tr>
               </thead>
               <tbody>
-                {reports.map((report) => (
+                {pagedReports.map((report) => (
                   <tr key={report.id} className={selectedReportId === report.id ? 'bg-cyan-50' : ''}>
                     <td>{formatDate(report.createdAt)}</td>
                     <td>
@@ -587,83 +642,33 @@ export function VipSyncTab({ token }: IntegrationProps) {
             </table>
           </div>
         )}
+        <PaginationControls
+          page={reportPage}
+          pageCount={reportPageCount}
+          totalItems={filteredReports.length}
+          onPageChange={setReportPage}
+        />
       </IntegrationPanel>
 
       {selectedReportId && (
-        <IntegrationPanel
-          title="Chi tiết lần nhập"
-          action={
-            <button className="icon-button" onClick={() => setSelectedReportId(null)} title="Đóng chi tiết" type="button">
-              <X className="h-4 w-4" />
-            </button>
-          }
-        >
-          {detailError && <InlineError message={detailError} />}
-          {detailLoading || !detail ? (
-            <LoadingState text="Đang tải chi tiết báo cáo..." />
-          ) : (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-5 sm:grid-cols-3 lg:grid-cols-6">
-                <ReportMetric label="Trạng thái" value={<StatusPill status={detail.status} />} />
-                <ReportMetric label="Tổng dòng" value={detail.totalRows} />
-                <ReportMetric label="Thành công" value={detail.successRows} />
-                <ReportMetric label="Trùng" value={detail.duplicateRows} />
-                <ReportMetric label="Lỗi" value={detail.errorRows} />
-                <ReportMetric label="Email đã gửi" value={detail.emailSentRows} />
-              </div>
-
-              {detail.errorMessage && <InlineError message={detail.errorMessage} />}
-
-              <section>
-                <h4 className="mb-3 text-sm font-semibold text-slate-900">Lỗi từng dòng</h4>
-                {!detail.rowErrors.length ? (
-                  <EmptyState text="Báo cáo không có lỗi dữ liệu theo dòng." />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="admin-table">
-                      <thead><tr><th>Dòng</th><th>Mã lỗi</th><th>Thông điệp</th><th>Dữ liệu</th></tr></thead>
-                      <tbody>
-                        {detail.rowErrors.map((rowError) => (
-                          <tr key={rowError.id}>
-                            <td>{rowError.rowNumber}</td>
-                            <td><StatusPill status={rowError.errorCode} /></td>
-                            <td>{rowError.message}</td>
-                            <td><code className="block max-w-[360px] whitespace-pre-wrap break-all text-xs">{JSON.stringify(rowError.rawData)}</code></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-
-              <section>
-                <h4 className="mb-3 text-sm font-semibold text-slate-900">Khách đã nhập</h4>
-                {!detail.vipGuests?.length ? (
-                  <EmptyState text="Báo cáo không có khách VIP mới." />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="admin-table min-w-[980px]">
-                      <thead><tr><th>Khách mời</th><th>Liên hệ</th><th>Công ty</th><th>Vé</th><th>Email</th><th>Lỗi email</th></tr></thead>
-                      <tbody>
-                        {detail.vipGuests.map((guest) => (
-                          <tr key={guest.id}>
-                            <td className="font-medium text-slate-900">{guest.fullName}</td>
-                            <td><p>{guest.email || '-'}</p><p className="text-xs text-slate-500">{guest.phone || '-'}</p></td>
-                            <td>{guest.company || '-'}</td>
-                            <td><StatusPill status={guest.ticketStatus} /></td>
-                            <td><StatusPill status={guest.emailStatus} /></td>
-                            <td className="max-w-[280px] text-xs text-rose-700">{guest.emailError || '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <section className="mt-6 flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+            <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-900">Chi tiết lần nhập</h3>
+              <button className="icon-button" onClick={() => setSelectedReportId(null)} title="Đóng chi tiết" type="button">
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          )}
-        </IntegrationPanel>
+            <div className="overflow-y-auto p-4">
+              {detailError && <InlineError message={detailError} />}
+              {detailLoading || !detail ? (
+                <LoadingState text="Đang tải chi tiết báo cáo..." />
+              ) : (
+                <ImportReportDetail detail={detail} />
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );
@@ -723,7 +728,7 @@ function EventCodeSelector({
 
 function IntegrationPanel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <section className="rounded-lg border border-slate-200 bg-white">
       <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
         {action}
@@ -780,6 +785,109 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function ReportMetric({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="min-w-0"><div className="text-xs font-semibold uppercase text-slate-500">{label}</div><div className="mt-1 text-lg font-semibold text-slate-900">{value}</div></div>;
+}
+
+function ImportReportDetail({ detail }: { detail: GuestImportReport }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-5 sm:grid-cols-3 lg:grid-cols-6">
+        <ReportMetric label="Trạng thái" value={<StatusPill status={detail.status} />} />
+        <ReportMetric label="Tổng dòng" value={detail.totalRows} />
+        <ReportMetric label="Thành công" value={detail.successRows} />
+        <ReportMetric label="Trùng" value={detail.duplicateRows} />
+        <ReportMetric label="Lỗi" value={detail.errorRows} />
+        <ReportMetric label="Email đã gửi" value={detail.emailSentRows} />
+      </div>
+
+      {detail.errorMessage && <InlineError message={detail.errorMessage} />}
+
+      <section>
+        <h4 className="mb-3 text-sm font-semibold text-slate-900">Lỗi từng dòng</h4>
+        {!detail.rowErrors.length ? (
+          <EmptyState text="Báo cáo không có lỗi dữ liệu theo dòng." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="admin-table">
+              <thead><tr><th>Dòng</th><th>Mã lỗi</th><th>Thông điệp</th><th>Dữ liệu</th></tr></thead>
+              <tbody>
+                {detail.rowErrors.map((rowError) => (
+                  <tr key={rowError.id}>
+                    <td>{rowError.rowNumber}</td>
+                    <td><StatusPill status={rowError.errorCode} /></td>
+                    <td>{rowError.message}</td>
+                    <td><code className="block max-w-[360px] whitespace-pre-wrap break-all text-xs">{JSON.stringify(rowError.rawData)}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h4 className="mb-3 text-sm font-semibold text-slate-900">Khách đã nhập</h4>
+        {!detail.vipGuests?.length ? (
+          <EmptyState text="Báo cáo không có khách VIP mới." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="admin-table min-w-[980px]">
+              <thead><tr><th>Khách mời</th><th>Liên hệ</th><th>Công ty</th><th>Vé</th><th>Email</th><th>Lỗi email</th></tr></thead>
+              <tbody>
+                {detail.vipGuests.map((guest) => (
+                  <tr key={guest.id}>
+                    <td className="font-medium text-slate-900">{guest.fullName}</td>
+                    <td><p>{guest.email || '-'}</p><p className="text-xs text-slate-500">{guest.phone || '-'}</p></td>
+                    <td>{guest.company || '-'}</td>
+                    <td><StatusPill status={guest.ticketStatus} /></td>
+                    <td><StatusPill status={guest.emailStatus} /></td>
+                    <td className="max-w-[280px] text-xs text-rose-700">{guest.emailError || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PaginationControls({
+  page,
+  pageCount,
+  totalItems,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+      <span>{totalItems} dòng dữ liệu</span>
+      <div className="flex items-center gap-2">
+        <button className="small-button" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))} type="button">
+          Trước
+        </button>
+        <span className="min-w-16 text-center font-semibold text-slate-700">{page}/{pageCount}</span>
+        <button className="small-button" disabled={page >= pageCount} onClick={() => onPageChange(Math.min(pageCount, page + 1))} type="button">
+          Sau
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLocaleLowerCase('vi-VN');
+}
+
+function paginate<T>(items: T[], page: number, pageSize: number) {
+  const start = (Math.max(1, page) - 1) * pageSize;
+  return items.slice(start, start + pageSize);
 }
 
 function formatDate(value?: string | null) {

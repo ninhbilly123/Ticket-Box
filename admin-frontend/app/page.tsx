@@ -10,11 +10,13 @@ import {
   CalendarClock,
   Check,
   ClipboardList,
+  Pencil,
   LogOut,
   RefreshCw,
   Shield,
   Ticket,
   Trash2,
+  X,
   Users,
 } from 'lucide-react';
 import {
@@ -36,6 +38,7 @@ import ConcertSetup from '../components/concert-setup';
 import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
 type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
+type RevenueTicketTypeRow = { name: string; quantity: number; revenue: number };
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'overview', label: 'Tổng quan', icon: BarChart3 },
@@ -54,6 +57,7 @@ const emptyConcertForm = {
   venue: '',
   startAt: '',
   saleOpenAt: '',
+  artistName: '',
   description: '',
   seatMapEnabled: false,
   organizationId: '',
@@ -67,7 +71,13 @@ const emptyTicketTypeForm = {
   maxPerAccount: '4',
   saleOpenAt: '',
   saleCloseAt: '',
+  status: 'ACTIVE',
 };
+
+const CONCERT_PAGE_SIZE = 8;
+const TICKET_PAGE_SIZE = 8;
+const STAFF_PAGE_SIZE = 8;
+const REVENUE_PAGE_SIZE = 8;
 
 const emptyStaffUserForm = {
   email: '',
@@ -95,10 +105,27 @@ export default function AdminHomePage() {
   const [concertForm, setConcertForm] = useState(emptyConcertForm);
   const [concertFormError, setConcertFormError] = useState<string | null>(null);
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);
+  const [editingTicketTypeId, setEditingTicketTypeId] = useState<string | null>(null);
+  const [ticketTypeFormError, setTicketTypeFormError] = useState<string | null>(null);
   const [staffForm, setStaffForm] = useState({ staffId: '', gateId: 'GATE-A' });
   const [staffUserForm, setStaffUserForm] = useState(emptyStaffUserForm);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Ban tổ chức hủy sự kiện');
+  const [concertQuery, setConcertQuery] = useState('');
+  const [concertStatusFilter, setConcertStatusFilter] = useState('ALL');
+  const [concertSort, setConcertSort] = useState('startAt-asc');
+  const [concertPage, setConcertPage] = useState(1);
+  const [ticketQuery, setTicketQuery] = useState('');
+  const [ticketStatusFilter, setTicketStatusFilter] = useState('ALL');
+  const [ticketSort, setTicketSort] = useState('price-desc');
+  const [ticketPage, setTicketPage] = useState(1);
+  const [staffQuery, setStaffQuery] = useState('');
+  const [staffGateFilter, setStaffGateFilter] = useState('ALL');
+  const [staffSort, setStaffSort] = useState('createdAt-desc');
+  const [staffPage, setStaffPage] = useState(1);
+  const [revenueQuery, setRevenueQuery] = useState('');
+  const [revenueSort, setRevenueSort] = useState('revenue-desc');
+  const [revenuePage, setRevenuePage] = useState(1);
 
   const token = session?.accessToken || '';
   const selectedConcert = useMemo(
@@ -106,6 +133,71 @@ export default function AdminHomePage() {
     [concerts, selectedConcertId]
   );
   const isOrganizer = session?.user.role === 'ORGANIZER';
+  const filteredConcerts = useMemo(() => {
+    const query = normalizeSearch(concertQuery);
+    const rows = concerts.filter((concert) => {
+      const matchesQuery =
+        !query ||
+        normalizeSearch(concert.name).includes(query) ||
+        normalizeSearch(concert.eventCode).includes(query) ||
+        normalizeSearch(concert.venue).includes(query);
+      const matchesStatus = concertStatusFilter === 'ALL' || concert.status === concertStatusFilter;
+      return matchesQuery && matchesStatus;
+    });
+
+    return rows.sort((left, right) => compareConcerts(left, right, concertSort));
+  }, [concertQuery, concertSort, concertStatusFilter, concerts]);
+  const concertPageCount = Math.max(1, Math.ceil(filteredConcerts.length / CONCERT_PAGE_SIZE));
+  const pagedConcerts = paginate(filteredConcerts, concertPage, CONCERT_PAGE_SIZE);
+  const filteredTicketTypes = useMemo(() => {
+    const query = normalizeSearch(ticketQuery);
+    const rows = ticketTypes.filter((ticketType) => {
+      const matchesQuery =
+        !query ||
+        normalizeSearch(ticketType.name).includes(query) ||
+        normalizeSearch(ticketType.zoneCode).includes(query);
+      const matchesStatus = ticketStatusFilter === 'ALL' || ticketType.status === ticketStatusFilter;
+      return matchesQuery && matchesStatus;
+    });
+
+    return rows.sort((left, right) => compareTicketTypes(left, right, ticketSort));
+  }, [ticketQuery, ticketSort, ticketStatusFilter, ticketTypes]);
+  const ticketPageCount = Math.max(1, Math.ceil(filteredTicketTypes.length / TICKET_PAGE_SIZE));
+  const pagedTicketTypes = paginate(filteredTicketTypes, ticketPage, TICKET_PAGE_SIZE);
+  const filteredStaffAssignments = useMemo(() => {
+    const query = normalizeSearch(staffQuery);
+    const rows = staffAssignments.filter((item) => {
+      const matchesQuery =
+        !query ||
+        normalizeSearch(item.staff?.fullName || item.staffId).includes(query) ||
+        normalizeSearch(item.staff?.email || '').includes(query) ||
+        normalizeSearch(item.gateId).includes(query);
+      const matchesGate = staffGateFilter === 'ALL' || item.gateId === staffGateFilter;
+      return matchesQuery && matchesGate;
+    });
+
+    return rows.sort((left, right) => compareStaffAssignments(left, right, staffSort));
+  }, [staffAssignments, staffGateFilter, staffQuery, staffSort]);
+  const staffGateOptions = useMemo(
+    () => Array.from(new Set(staffAssignments.map((item) => item.gateId))).sort((left, right) => left.localeCompare(right, 'vi')),
+    [staffAssignments]
+  );
+  const staffPageCount = Math.max(1, Math.ceil(filteredStaffAssignments.length / STAFF_PAGE_SIZE));
+  const pagedStaffAssignments = paginate(filteredStaffAssignments, staffPage, STAFF_PAGE_SIZE);
+  const filteredRevenueRows = useMemo(() => {
+    const query = normalizeSearch(revenueQuery);
+    const rows = Object.entries(revenue?.byTicketType || {})
+      .map(([name, value]) => ({
+        name,
+        quantity: value.quantity,
+        revenue: value.revenue,
+      }))
+      .filter((row) => !query || normalizeSearch(row.name).includes(query));
+
+    return rows.sort((left, right) => compareRevenueRows(left, right, revenueSort));
+  }, [revenue?.byTicketType, revenueQuery, revenueSort]);
+  const revenuePageCount = Math.max(1, Math.ceil(filteredRevenueRows.length / REVENUE_PAGE_SIZE));
+  const pagedRevenueRows = paginate(filteredRevenueRows, revenuePage, REVENUE_PAGE_SIZE);
 
   useEffect(() => {
     const syncSessionFromStorage = () => {
@@ -147,6 +239,48 @@ export default function AdminHomePage() {
       void loadConcertScoped(selectedConcert.id);
     }
   }, [session?.accessToken, selectedConcert?.id]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    setConcertPage(1);
+  }, [concertQuery, concertStatusFilter, concertSort]);
+
+  useEffect(() => {
+    if (concertPage > concertPageCount) setConcertPage(concertPageCount);
+  }, [concertPage, concertPageCount]);
+
+  useEffect(() => {
+    setTicketPage(1);
+  }, [selectedConcert?.id, ticketQuery, ticketStatusFilter, ticketSort]);
+
+  useEffect(() => {
+    if (ticketPage > ticketPageCount) setTicketPage(ticketPageCount);
+  }, [ticketPage, ticketPageCount]);
+
+  useEffect(() => {
+    setStaffPage(1);
+  }, [selectedConcert?.id, staffGateFilter, staffQuery, staffSort]);
+
+  useEffect(() => {
+    if (staffPage > staffPageCount) setStaffPage(staffPageCount);
+  }, [staffPage, staffPageCount]);
+
+  useEffect(() => {
+    setRevenuePage(1);
+  }, [selectedConcert?.id, revenueQuery, revenueSort]);
+
+  useEffect(() => {
+    if (revenuePage > revenuePageCount) setRevenuePage(revenuePageCount);
+  }, [revenuePage, revenuePageCount]);
+
+  useEffect(() => {
+    resetTicketTypeForm();
+  }, [selectedConcert?.id]);
 
   async function loadAll() {
     if (!token) return;
@@ -234,6 +368,98 @@ export default function AdminHomePage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function resetTicketTypeForm() {
+    setEditingTicketTypeId(null);
+    setTicketTypeForm(emptyTicketTypeForm);
+    setTicketTypeFormError(null);
+  }
+
+  function beginEditTicketType(ticketType: TicketType) {
+    setEditingTicketTypeId(ticketType.id);
+    setTicketTypeForm({
+      name: ticketType.name,
+      zoneCode: ticketType.zoneCode,
+      price: String(ticketType.price),
+      totalQuantity: String(ticketType.inventory?.totalQuantity ?? ticketType.totalQuantity),
+      maxPerAccount: String(ticketType.maxPerAccount),
+      saleOpenAt: toDateTimeInput(ticketType.saleOpenAt),
+      saleCloseAt: toDateTimeInput(ticketType.saleCloseAt),
+      status: ticketType.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+    });
+    setTicketTypeFormError(null);
+  }
+
+  function validateTicketTypeForm() {
+    const name = ticketTypeForm.name.trim();
+    const zoneCode = ticketTypeForm.zoneCode.trim().toUpperCase();
+    if (!name || !zoneCode) {
+      return 'Tên loại vé và mã khu vực là bắt buộc.';
+    }
+    const duplicate = ticketTypes.find(
+      (item) =>
+        item.id !== editingTicketTypeId &&
+        (item.name.trim().toLocaleLowerCase('vi-VN') === name.toLocaleLowerCase('vi-VN') ||
+          item.zoneCode.trim().toUpperCase() === zoneCode)
+    );
+    if (duplicate) {
+      return `Loại vé hoặc mã khu vực đã tồn tại (${duplicate.name} / ${duplicate.zoneCode}).`;
+    }
+    if (Number(ticketTypeForm.price) < 0 || Number(ticketTypeForm.totalQuantity) < 0 || Number(ticketTypeForm.maxPerAccount) <= 0) {
+      return 'Giá, số lượng và giới hạn mua phải hợp lệ.';
+    }
+    return null;
+  }
+
+  function submitTicketType(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedConcert) return;
+
+    const validationError = validateTicketTypeForm();
+    if (validationError) {
+      setTicketTypeFormError(validationError);
+      return;
+    }
+
+    setTicketTypeFormError(null);
+    const zoneCode = ticketTypeForm.zoneCode.trim().toUpperCase();
+    const totalQuantity = Number(ticketTypeForm.totalQuantity);
+    const saleOpenAt = ticketTypeForm.saleOpenAt ? new Date(ticketTypeForm.saleOpenAt).toISOString() : undefined;
+    const saleCloseAt = ticketTypeForm.saleCloseAt ? new Date(ticketTypeForm.saleCloseAt).toISOString() : undefined;
+
+    void runMutation(
+      async () => {
+        if (editingTicketTypeId) {
+          const current = ticketTypes.find((item) => item.id === editingTicketTypeId);
+          await adminApi.updateTicketType(token, editingTicketTypeId, {
+            name: ticketTypeForm.name.trim(),
+            zoneCode,
+            price: Number(ticketTypeForm.price),
+            maxPerAccount: Number(ticketTypeForm.maxPerAccount),
+            saleOpenAt: saleOpenAt || null,
+            saleCloseAt: saleCloseAt || null,
+            status: ticketTypeForm.status,
+          });
+          const currentTotal = current?.inventory?.totalQuantity ?? current?.totalQuantity;
+          if (currentTotal !== totalQuantity) {
+            await adminApi.updateInventory(token, editingTicketTypeId, totalQuantity);
+          }
+        } else {
+          await adminApi.createTicketType(token, selectedConcert.id, {
+            name: ticketTypeForm.name.trim(),
+            zoneCode,
+            price: Number(ticketTypeForm.price),
+            totalQuantity,
+            maxPerAccount: Number(ticketTypeForm.maxPerAccount),
+            saleOpenAt,
+            saleCloseAt,
+          });
+        }
+        resetTicketTypeForm();
+      },
+      editingTicketTypeId ? 'Đã cập nhật thông tin loại vé.' : 'Đã tạo loại vé và tồn kho.'
+    );
   }
 
   if (!session) {
@@ -473,6 +699,26 @@ export default function AdminHomePage() {
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
           <Panel title="Danh sách sự kiện">
+            <div className="mb-3 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_180px_200px]">
+              <input
+                className="input"
+                onChange={(event) => setConcertQuery(event.target.value)}
+                placeholder="Tìm theo tên, mã hoặc địa điểm"
+                value={concertQuery}
+              />
+              <select className="select" onChange={(event) => setConcertStatusFilter(event.target.value)} value={concertStatusFilter}>
+                <option value="ALL">Tất cả trạng thái</option>
+                {Array.from(new Set(concerts.map((concert) => concert.status))).map((status) => (
+                  <option key={status} value={status}>{formatStatusLabel(status)}</option>
+                ))}
+              </select>
+              <select className="select" onChange={(event) => setConcertSort(event.target.value)} value={concertSort}>
+                <option value="startAt-asc">Sớm nhất trước</option>
+                <option value="startAt-desc">Muộn nhất trước</option>
+                <option value="name-asc">Tên A-Z</option>
+                <option value="name-desc">Tên Z-A</option>
+              </select>
+            </div>
             <div className="overflow-x-auto">
               <table className="admin-table">
                 <thead>
@@ -486,10 +732,10 @@ export default function AdminHomePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {concerts.map((concert) => (
+                  {pagedConcerts.map((concert) => (
                     <tr key={concert.id} className={concert.id === selectedConcert?.id ? 'bg-cyan-50' : ''}>
                       <td><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{concert.eventCode}</span></td>
-                      <td className="font-medium">{concert.name}</td>
+                      <td className="font-medium text-slate-900 shadow-none">{concert.name}</td>
                       <td>
                         <StatusBadge status={concert.status} />
                       </td>
@@ -514,6 +760,12 @@ export default function AdminHomePage() {
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              page={concertPage}
+              pageCount={concertPageCount}
+              totalItems={filteredConcerts.length}
+              onPageChange={setConcertPage}
+            />
           </Panel>
           <Panel title="Tạo sự kiện">
             <form
@@ -528,14 +780,20 @@ export default function AdminHomePage() {
                 setConcertFormError(null);
                 void runMutation(
                   async () => {
+                    const artistName = concertForm.artistName.trim();
                     const created = await adminApi.createConcert(token, {
-                      ...concertForm,
                       eventCode,
+                      name: concertForm.name,
+                      venue: concertForm.venue,
                       startAt: new Date(concertForm.startAt).toISOString(),
                       saleOpenAt: new Date(concertForm.saleOpenAt).toISOString(),
                       organizationId: concertForm.organizationId || undefined,
                       description: concertForm.description || undefined,
+                      seatMapEnabled: concertForm.seatMapEnabled,
                     });
+                    if (artistName) {
+                      await adminApi.addConcertArtist(token, created.id, artistName);
+                    }
                     setSelectedConcertId(created.id);
                     setConcertForm(emptyConcertForm);
                   },
@@ -558,6 +816,7 @@ export default function AdminHomePage() {
                 {concertFormError && <span className="text-xs font-medium text-rose-700">{concertFormError}</span>}
               </Field>
               <TextInput label="Tên" required value={concertForm.name} onChange={(value) => setConcertForm({ ...concertForm, name: value })} />
+              <TextInput label="Nghệ sĩ" required value={concertForm.artistName} onChange={(value) => setConcertForm({ ...concertForm, artistName: value })} />
               <TextInput label="Địa điểm" required value={concertForm.venue} onChange={(value) => setConcertForm({ ...concertForm, venue: value })} />
               <TextInput label="Thời gian bắt đầu" required type="datetime-local" value={concertForm.startAt} onChange={(value) => setConcertForm({ ...concertForm, startAt: value })} />
               <TextInput label="Thời gian mở bán" required type="datetime-local" value={concertForm.saleOpenAt} onChange={(value) => setConcertForm({ ...concertForm, saleOpenAt: value })} />
@@ -591,6 +850,25 @@ export default function AdminHomePage() {
       return (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
           <Panel title="Loại vé và tồn kho">
+            <div className="mb-3 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_160px_190px]">
+              <input
+                className="input"
+                onChange={(event) => setTicketQuery(event.target.value)}
+                placeholder="Tìm theo tên hoặc mã khu vực"
+                value={ticketQuery}
+              />
+              <select className="select" onChange={(event) => setTicketStatusFilter(event.target.value)} value={ticketStatusFilter}>
+                <option value="ALL">Tất cả trạng thái</option>
+                <option value="ACTIVE">Đang bán</option>
+                <option value="INACTIVE">Tạm ẩn</option>
+              </select>
+              <select className="select" onChange={(event) => setTicketSort(event.target.value)} value={ticketSort}>
+                <option value="price-desc">Giá cao trước</option>
+                <option value="price-asc">Giá thấp trước</option>
+                <option value="name-asc">Tên A-Z</option>
+                <option value="remaining-desc">Còn lại nhiều trước</option>
+              </select>
+            </div>
             <div className="overflow-x-auto">
               <table className="admin-table">
                 <thead>
@@ -602,12 +880,13 @@ export default function AdminHomePage() {
                     <th>Còn lại</th>
                     <th>Đã bán</th>
                     <th>Tối đa/tài khoản</th>
+                    <th>Trạng thái</th>
                     <th>Cập nhật tổng</th>
-                    <th></th>
+                    <th>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ticketTypes.map((item) => (
+                  {pagedTicketTypes.map((item) => (
                     <tr key={item.id}>
                       <td className="font-medium">{item.name}</td>
                       <td><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold">{item.zoneCode}</span></td>
@@ -616,6 +895,7 @@ export default function AdminHomePage() {
                       <td>{item.inventory?.availableQuantity ?? '-'}</td>
                       <td>{item.inventory?.soldQuantity ?? item.soldQuantity}</td>
                       <td>{item.maxPerAccount}</td>
+                      <td><StatusBadge status={item.status} /></td>
                       <td>
                         <div className="flex gap-2">
                           <input
@@ -639,46 +919,44 @@ export default function AdminHomePage() {
                         </div>
                       </td>
                       <td>
-                        {selectedConcert?.status === 'DRAFT' && (
+                        <div className="flex gap-2">
                           <button
                             className="icon-button"
-                            onClick={() => runMutation(() => adminApi.deleteTicketType(token, item.id), 'Đã xóa loại vé.')}
+                            disabled={selectedConcert?.status !== 'DRAFT'}
+                            onClick={() => beginEditTicketType(item)}
+                            title="Sửa loại vé"
+                            type="button"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            className="icon-button"
+                            disabled={selectedConcert?.status !== 'DRAFT'}
+                            onClick={() => {
+                              if (!window.confirm(`Xóa loại vé ${item.name}?`)) return;
+                              void runMutation(() => adminApi.deleteTicketType(token, item.id), 'Đã xóa loại vé.');
+                            }}
                             title="Xóa loại vé"
                             type="button"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              page={ticketPage}
+              pageCount={ticketPageCount}
+              totalItems={filteredTicketTypes.length}
+              onPageChange={setTicketPage}
+            />
           </Panel>
-          <Panel title="Tạo loại vé">
-            <form
-              className="space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!selectedConcert) return;
-                void runMutation(
-                  async () => {
-                    await adminApi.createTicketType(token, selectedConcert.id, {
-                      name: ticketTypeForm.name,
-                      zoneCode: ticketTypeForm.zoneCode.trim().toUpperCase(),
-                      price: Number(ticketTypeForm.price),
-                      totalQuantity: Number(ticketTypeForm.totalQuantity),
-                      maxPerAccount: Number(ticketTypeForm.maxPerAccount),
-                      saleOpenAt: ticketTypeForm.saleOpenAt ? new Date(ticketTypeForm.saleOpenAt).toISOString() : undefined,
-                      saleCloseAt: ticketTypeForm.saleCloseAt ? new Date(ticketTypeForm.saleCloseAt).toISOString() : undefined,
-                    });
-                    setTicketTypeForm(emptyTicketTypeForm);
-                  },
-                  'Đã tạo loại vé và tồn kho.'
-                );
-              }}
-            >
+          <Panel title={editingTicketTypeId ? 'Sửa loại vé' : 'Tạo loại vé'}>
+            <form className="space-y-3" onSubmit={submitTicketType}>
               <TextInput label="Tên" required value={ticketTypeForm.name} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, name: value })} />
               <TextInput label="Mã zoneCode" required value={ticketTypeForm.zoneCode} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, zoneCode: value.toUpperCase() })} />
               <TextInput label="Giá" required type="number" value={ticketTypeForm.price} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, price: value })} />
@@ -686,11 +964,27 @@ export default function AdminHomePage() {
               <TextInput label="Tối đa mỗi tài khoản" required type="number" value={ticketTypeForm.maxPerAccount} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, maxPerAccount: value })} />
               <TextInput label="Mở bán riêng (không bắt buộc)" type="datetime-local" value={ticketTypeForm.saleOpenAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleOpenAt: value })} />
               <TextInput label="Đóng bán riêng (không bắt buộc)" type="datetime-local" value={ticketTypeForm.saleCloseAt} onChange={(value) => setTicketTypeForm({ ...ticketTypeForm, saleCloseAt: value })} />
+              {editingTicketTypeId && (
+                <Field label="Trạng thái">
+                  <select className="select w-full" onChange={(event) => setTicketTypeForm({ ...ticketTypeForm, status: event.target.value })} value={ticketTypeForm.status}>
+                    <option value="ACTIVE">Đang bán</option>
+                    <option value="INACTIVE">Tạm ẩn</option>
+                  </select>
+                </Field>
+              )}
+              {ticketTypeFormError && <Alert message={ticketTypeFormError} />}
               {selectedConcert?.status !== 'DRAFT' && <p className="text-sm text-amber-700">Cấu hình loại vé đã khóa sau khi công khai.</p>}
-              <button disabled={saving || !selectedConcert || selectedConcert.status !== 'DRAFT'} className="primary-button w-full" type="submit">
-                <Ticket className="h-4 w-4" />
-                Tạo loại vé
-              </button>
+              <div className="flex gap-2">
+                <button disabled={saving || !selectedConcert || selectedConcert.status !== 'DRAFT'} className="primary-button flex-1" type="submit">
+                  <Ticket className="h-4 w-4" />
+                  {editingTicketTypeId ? 'Lưu loại vé' : 'Tạo loại vé'}
+                </button>
+                {editingTicketTypeId && (
+                  <button className="icon-button" onClick={resetTicketTypeForm} title="Hủy sửa" type="button">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </form>
           </Panel>
         </div>
@@ -701,15 +995,37 @@ export default function AdminHomePage() {
       return (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
           <Panel title="Phân công nhân viên">
+            <div className="mb-3 grid gap-2 md:grid-cols-[1fr_180px_180px]">
+              <input
+                className="input"
+                onChange={(event) => setStaffQuery(event.target.value)}
+                placeholder="Tìm nhân viên, email hoặc cổng"
+                value={staffQuery}
+              />
+              <select className="select" onChange={(event) => setStaffGateFilter(event.target.value)} value={staffGateFilter}>
+                <option value="ALL">Tất cả cổng</option>
+                {staffGateOptions.map((gateId) => (
+                  <option key={gateId} value={gateId}>
+                    {gateId}
+                  </option>
+                ))}
+              </select>
+              <select className="select" onChange={(event) => setStaffSort(event.target.value)} value={staffSort}>
+                <option value="createdAt-desc">Mới phân công</option>
+                <option value="createdAt-asc">Cũ trước</option>
+                <option value="name-asc">Tên A-Z</option>
+                <option value="gate-asc">Cổng A-Z</option>
+              </select>
+            </div>
             <DataTable
               headers={['Nhân viên', 'Email', 'Cổng', 'Ngày tạo']}
-              rows={staffAssignments.map((item) => [
+              rows={pagedStaffAssignments.map((item) => [
                 item.staff?.fullName || item.staffId,
                 item.staff?.email || '-',
                 item.gateId,
                 formatDate(item.createdAt),
               ])}
-              actions={staffAssignments.map((item) => (
+              actions={pagedStaffAssignments.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => runMutation(() => adminApi.deleteStaffAssignment(token, item.id), 'Đã gỡ phân công.')}
@@ -719,6 +1035,12 @@ export default function AdminHomePage() {
                   Gỡ
                 </button>
               ))}
+            />
+            <PaginationControls
+              page={staffPage}
+              pageCount={staffPageCount}
+              totalItems={filteredStaffAssignments.length}
+              onPageChange={setStaffPage}
             />
           </Panel>
           <div className="space-y-5">
@@ -819,13 +1141,34 @@ export default function AdminHomePage() {
             <Stat label="Doanh thu" value={formatMoney(revenue?.totalRevenue || 0)} icon={BarChart3} />
           </div>
           <Panel title="Doanh thu theo loại vé">
+            <div className="mb-3 grid gap-2 md:grid-cols-[1fr_220px]">
+              <input
+                className="input"
+                onChange={(event) => setRevenueQuery(event.target.value)}
+                placeholder="Tìm theo loại vé"
+                value={revenueQuery}
+              />
+              <select className="select" onChange={(event) => setRevenueSort(event.target.value)} value={revenueSort}>
+                <option value="revenue-desc">Doanh thu cao trước</option>
+                <option value="revenue-asc">Doanh thu thấp trước</option>
+                <option value="quantity-desc">Số lượng cao trước</option>
+                <option value="quantity-asc">Số lượng thấp trước</option>
+                <option value="name-asc">Tên A-Z</option>
+              </select>
+            </div>
             <DataTable
               headers={['Loại vé', 'Số lượng', 'Doanh thu']}
-              rows={Object.entries(revenue?.byTicketType || {}).map(([name, value]) => [
-                name,
-                value.quantity,
-                formatMoney(value.revenue),
+              rows={pagedRevenueRows.map((row) => [
+                row.name,
+                row.quantity,
+                formatMoney(row.revenue),
               ])}
+            />
+            <PaginationControls
+              page={revenuePage}
+              pageCount={revenuePageCount}
+              totalItems={filteredRevenueRows.length}
+              onPageChange={setRevenuePage}
             />
           </Panel>
         </div>
@@ -850,6 +1193,60 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString('vi-VN');
 }
 
+function toDateTimeInput(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLocaleLowerCase('vi-VN');
+}
+
+function paginate<T>(items: T[], page: number, pageSize: number) {
+  const start = (Math.max(1, page) - 1) * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
+function compareConcerts(left: Concert, right: Concert, sort: string) {
+  if (sort === 'name-asc') return left.name.localeCompare(right.name, 'vi');
+  if (sort === 'name-desc') return right.name.localeCompare(left.name, 'vi');
+  const leftTime = new Date(left.startAt).getTime();
+  const rightTime = new Date(right.startAt).getTime();
+  return sort === 'startAt-desc' ? rightTime - leftTime : leftTime - rightTime;
+}
+
+function getTicketRemaining(ticketType: TicketType) {
+  return ticketType.inventory?.availableQuantity ?? Math.max(0, ticketType.totalQuantity - ticketType.reservedQuantity - ticketType.soldQuantity);
+}
+
+function compareTicketTypes(left: TicketType, right: TicketType, sort: string) {
+  if (sort === 'name-asc') return left.name.localeCompare(right.name, 'vi');
+  if (sort === 'price-asc') return Number(left.price) - Number(right.price);
+  if (sort === 'remaining-desc') return getTicketRemaining(right) - getTicketRemaining(left);
+  return Number(right.price) - Number(left.price);
+}
+
+function compareStaffAssignments(left: StaffAssignment, right: StaffAssignment, sort: string) {
+  if (sort === 'name-asc') {
+    return (left.staff?.fullName || left.staffId).localeCompare(right.staff?.fullName || right.staffId, 'vi');
+  }
+  if (sort === 'gate-asc') return left.gateId.localeCompare(right.gateId, 'vi');
+  const leftTime = new Date(left.createdAt).getTime();
+  const rightTime = new Date(right.createdAt).getTime();
+  return sort === 'createdAt-asc' ? leftTime - rightTime : rightTime - leftTime;
+}
+
+function compareRevenueRows(left: RevenueTicketTypeRow, right: RevenueTicketTypeRow, sort: string) {
+  if (sort === 'name-asc') return left.name.localeCompare(right.name, 'vi');
+  if (sort === 'revenue-asc') return left.revenue - right.revenue;
+  if (sort === 'quantity-desc') return right.quantity - left.quantity;
+  if (sort === 'quantity-asc') return left.quantity - right.quantity;
+  return right.revenue - left.revenue;
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded border border-white/10 bg-white/5 p-3">
@@ -861,7 +1258,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <section className="rounded-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h3 className="font-semibold">{title}</h3>
       </div>
@@ -919,7 +1316,7 @@ function Success({ message }: { message: string }) {
 
 function Stat({ label, value, icon: Icon }: { label: string; value: number | string; icon: typeof BarChart3 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <span className="text-sm text-slate-500">{label}</span>
         <Icon className="h-4 w-4 text-cyan-700" />
@@ -958,6 +1355,47 @@ function StatusBadge({ status }: { status: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">{text}</div>;
+}
+
+function PaginationControls({
+  page,
+  pageCount,
+  totalItems,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (pageCount <= 1 && totalItems <= 8) return null;
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+      <span>{totalItems} dòng dữ liệu</span>
+      <div className="flex items-center gap-2">
+        <button
+          className="small-button"
+          disabled={page <= 1}
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          type="button"
+        >
+          Trước
+        </button>
+        <span className="min-w-16 text-center font-semibold text-slate-700">
+          {page}/{pageCount}
+        </span>
+        <button
+          className="small-button"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(Math.min(pageCount, page + 1))}
+          type="button"
+        >
+          Sau
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function DataTable({
