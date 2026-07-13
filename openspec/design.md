@@ -1,10 +1,10 @@
-# KIẾN TRÚC TỔNG THỂ & KHẢ NĂNG CÔ LẬP LỖI - TICKETBOX
+## KIẾN TRÚC TỔNG THỂ & KHẢ NĂNG CÔ LẬP LỖI - TICKETBOX
 
 Tài liệu này trình bày thiết kế kiến trúc phần mềm của hệ thống **TicketBox**, lý do lựa chọn mô hình kiến trúc, cách các thành phần tương tác và cơ chế cô lập lỗi để bảo vệ hệ thống trước các sự cố vận hành thực tế.
 
 ---
 
-## 1. Kiến trúc Tổng thể (Overall Architecture)
+### 1. Kiến trúc Tổng thể (Overall Architecture)
 
 Hệ thống TicketBox được thiết kế theo mô hình **Modular Monolith (Monolith đơn khối phân rã mô-đun)** đối với Backend, kết hợp với các Frontend được tách biệt hoàn toàn theo vai trò người dùng (Customer Web, Admin Portal, Scanner App).
 
@@ -51,7 +51,7 @@ Hệ thống TicketBox được thiết kế theo mô hình **Modular Monolith (
                            +---------------------------+
 ```
 
-### Các thành phần chính trong hệ thống:
+#### Các thành phần chính trong hệ thống:
 1.  **Client-side (Ứng dụng phía máy khách):**
     *   **Customer Frontend (Next.js 14 App Router):** Phục vụ khán giả tìm kiếm concert, xem chi tiết và tiến hành luồng đặt vé, thanh toán trực tuyến.
     *   **Admin Frontend (Next.js):** Dành cho Ban tổ chức quản lý cấu hình vé, xem báo cáo doanh thu, duyệt tiểu sử nghệ sĩ do AI sinh và cấu hình nhãn hàng tài trợ.
@@ -74,7 +74,7 @@ Hệ thống TicketBox được thiết kế theo mô hình **Modular Monolith (
 
 ---
 
-## 2. Lý do chọn Kiến trúc Modular Monolith
+### 2. Lý do chọn Kiến trúc Modular Monolith
 
 Mô hình **Modular Monolith** được lựa chọn thay vì Microservices dựa trên các lập luận kiến trúc và bối cảnh vận hành sau:
 
@@ -89,7 +89,7 @@ Mô hình **Modular Monolith** được lựa chọn thay vì Microservices dự
 
 ---
 
-## 3. Khả năng Cô lập Lỗi (Error Isolation & Resilience)
+### 3. Khả năng Cô lập Lỗi (Error Isolation & Resilience)
 
 Kiến trúc TicketBox được thiết kế với tư duy **Design for Failure (Thiết kế chịu lỗi)**, đảm bảo sự cố tại một thành phần không làm sập toàn bộ hệ thống (Cascading Failure).
 
@@ -131,7 +131,15 @@ Kiến trúc TicketBox được thiết kế với tư duy **Design for Failure 
     *   *Hiệu quả cô lập:* Việc email gửi chậm không ảnh hưởng đến giao dịch thanh toán thành công hay trạng thái vé trên DB. Khán giả vẫn sở hữu vé hợp lệ và có thể quét QR trực tiếp từ giao diện "Vé của tôi" trên Web App, trong khi worker email tự động thực hiện cơ chế retry để gửi mail sau.
 
 ---
+## C4 Diagram
 
+### Level 1 — System Context
+<!-- Sơ đồ: TicketBox + actors + hệ thống ngoài (VNPAY, MoMo, AI model, CSV nhãn hàng) -->
+
+### Level 2 — Container
+<!-- Sơ đồ: web app, mobile app soát vé, backend API, database, message broker, ... -->
+
+---
 ## High-Level Architecture Diagram (Tích hợp & Ngoại tuyến)
 
 Phần này trình bày sơ đồ luồng dữ liệu (Data Flow) tổng quan của hệ thống và các trình tự xử lý (Sequence Diagrams) cho hai luồng nghiệp vụ đặc thù: tích hợp thanh toán (có ranh giới chịu lỗi) và soát vé ngoại tuyến.
@@ -439,7 +447,10 @@ erDiagram
 *   **Idempotency Key:** Cấu hình unique (`UK`) trên trường `idempotencyKey` của bảng `Order` và bảng `Payment` để đảm bảo cơ chế không ghi trùng dữ liệu ở mức Database vật lý (ngăn chặn double inserts do lỗi mạng).
 *   **Mối liên kết soát vé (CheckinLog):** Bảng `CheckinLog` liên kết trực tiếp tới `Ticket` (quan hệ 1-n) để lưu lại dấu vết lịch sử quét vé của nhân sự soát vé (`gateStaffId`), hỗ trợ đối soát chéo và xử lý xung đột ngoại tuyến.
 
-
+---
+## Thiết kế kiểm soát truy cập
+<!-- Mô hình phân quyền, các nhóm người dùng, cách kiểm tra quyền tại từng điểm truy cập -->
+---
 ## Thiết kế các cơ chế bảo vệ hệ thống
 
 ### Xử lý cổng thanh toán không ổn định
@@ -553,3 +564,8 @@ Hệ thống sử dụng mô hình **Cache-aside (Đọc đệm từ bên cạnh
     *   Hệ thống phát sự kiện lên RabbitMQ. Một Worker chạy nền lắng nghe sự kiện này và thực hiện:
         1.  Truy vấn toàn bộ danh sách filter keys từ Redis Set `concert:list:keys` bằng lệnh `SMEMBERS`, sau đó thực hiện xóa hàng loạt (`DEL`) toàn bộ cache danh sách concert.
         2.  Xóa bỏ key chi tiết concert `concert:detail:${concertId}` và key tóm tắt vé khả dụng `ticket:availability:${concertId}` để nạp lại dữ liệu mới nhất.
+
+---
+## Các quyết định kỹ thuật quan trọng (ADR)
+<!-- Với mỗi quyết định lớn: lựa chọn gì, tại sao, đánh đổi gì.
+     Ví dụ: SQL vs NoSQL, JWT vs Session, Kafka vs RabbitMQ, optimistic vs pessimistic locking, ... -->
