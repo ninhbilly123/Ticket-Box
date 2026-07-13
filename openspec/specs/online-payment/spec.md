@@ -31,6 +31,13 @@ Hệ thống SHALL áp dụng cơ chế Idempotency Key đối với tất cả 
 - **WHEN** Khán giả gửi yêu cầu thanh toán đi kèm Idempotency Key của một giao dịch đã xử lý thành công trước đó
 - **THEN** Hệ thống SHALL trả về thông tin kết quả của giao dịch cũ ngay lập tức mà không thực hiện trừ tiền hoặc tạo giao dịch mới trong database.
 
+#### Scenario: Nhận webhook/IPN trùng lặp từ đối tác
+- **WHEN** Webhook/IPN của cổng thanh toán gửi lại thông báo kết quả thanh toán cho một giao dịch đã được ghi nhận thành công trước đó
+- **THEN** Hệ thống SHALL đối chiếu Idempotency Key (hoặc mã giao dịch đối tác)
+- **AND** SHALL phản hồi thành công (IPN OK) ngay lập tức mà không thực hiện xử lý lại giao dịch hay ghi đè database.
+
+
+
 ### Requirement: Tự động ngắt kết nối cổng thanh toán bằng Circuit Breaker
 Hệ thống SHALL sử dụng cơ chế Circuit Breaker để tự động ngắt kết nối tạm thời với cổng thanh toán đối tác (VNPAY hoặc MoMo) khi phát hiện cổng đó gặp lỗi kết nối liên tục (vượt quá 5 lần).
 
