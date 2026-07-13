@@ -1,0 +1,44 @@
+HƯỚNG DẪN KHỞI CHẠY DỰ ÁN & ĐỒNG BỘ DATABASE (TICKETBOX)
+
+Dành cho các thành viên trong nhóm khi pull code mới về để chạy toàn bộ hệ thống từ đầu.
+
+---
+
+BƯỚC 1: KHỞI ĐỘNG HẠ TẦNG (DOCKER COMPOSE)
+Mở terminal ở thư mục gốc của dự án (nơi chứa file docker-compose.yml) và chạy lệnh:
+   docker compose up -d
+
+* Lệnh này sẽ chạy ngầm cơ sở dữ liệu PostgreSQL, Redis và RabbitMQ.
+
+---
+
+BƯỚC 2: TẠO VÀ ĐỒNG BỘ MIGRATION (LÀM 1 LẦN ĐỂ ĐỒNG BỘ)
+Di chuyển vào thư mục 'backend' của dự án:
+   cd backend
+
+Chạy lệnh tạo migration từ cấu trúc schema.prisma mới nhất:
+   npx prisma migrate dev --name sync_full_schema
+   * Khi được hỏi có đồng ý Reset database không, nhập 'y' (yes) để đồng ý.
+
+Nạp dữ liệu mẫu mới nhất vào database:
+   npx prisma db seed
+
+* Lưu ý cho người tạo: Hãy commit và push thư mục migration mới sinh ra (nằm trong backend/prisma/migrations/) lên Git để các thành viên khác chỉ cần chạy "npx prisma migrate dev" là xong.
+
+---
+
+BƯỚC 3: CHẠY BACKEND API SERVER
+Tại thư mục 'backend':
+   npm run dev
+
+* Server API sẽ chạy tại địa chỉ http://localhost:3000
+
+---
+
+BƯỚC 4: CHẠY FRONTEND WEB APP
+Mở một cửa sổ terminal mới, di chuyển vào thư mục 'frontend':
+   cd frontend
+   npm run dev
+
+* Giao diện người dùng sẽ chạy tại địa chỉ http://localhost:3001
+* Giao diện soát vé Check-in Portal sẽ nằm ở: http://localhost:3001/checkin

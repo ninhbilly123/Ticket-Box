@@ -274,3 +274,85 @@ git rebase origin/develop
 
 - [`specs/proposal.md`](./proposal.md) — Mô tả bài toán, phạm vi, mục tiêu
 - [`specs/design.md`](./design.md) — Kiến trúc hệ thống, C4 diagram, DB schema, RBAC, cơ chế kỹ thuật
+---
+
+## Member A: Auth, RBAC, Admin APIs
+
+OpenSpec change:
+
+- `openspec/changes/2026-06-17-auth-rbac-admin/`
+
+Main backend endpoints are mounted under `/api/v1`:
+
+- Auth: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`, `GET /auth/me`
+- Admin concerts: `GET|POST /admin/concerts`, `GET|PATCH /admin/concerts/:id`, `POST /admin/concerts/:id/publish`, `POST /admin/concerts/:id/cancel`
+- Ticket types: `GET|POST /admin/concerts/:concertId/ticket-types`, `PATCH|DELETE /admin/ticket-types/:id`
+- Inventory: `GET|PATCH /admin/ticket-types/:id/inventory`
+- Staff accounts: `GET|POST /admin/staff`
+- Staff assignments: `GET|POST /admin/concerts/:concertId/staff-assignments`, `DELETE /admin/staff-assignments/:id`
+- Whitelist email configs: `GET|POST /admin/whitelist-email-configs`, `PATCH|DELETE /admin/whitelist-email-configs/:id`
+- Internal CSV worker config: `GET /internal/whitelist-email-configs/active`
+- Revenue: `GET /admin/concerts/:id/revenue-summary`, `GET /admin/concerts/:id/sales-stats`
+- OpenAPI JSON: `GET /openapi/member-a.json`
+
+Seed accounts after `npx prisma db seed`:
+
+| Email | Role | Password |
+|---|---|---|
+| `organizer@example.com` | `ORGANIZER` | `Password123!` |
+| `staff@example.com` | `CHECKIN_STAFF` | `Password123!` |
+| `audience@example.com` | `AUDIENCE` | `Password123!` |
+
+Run locally:
+
+```bash
+docker compose up -d
+cd backend
+npm install
+npx prisma migrate dev
+npx prisma db seed
+npm run dev
+```
+
+Verify Member A flow:
+
+```bash
+cd backend
+npm run build
+npm run test:member-a
+```
+
+---
+
+## AI Artist Bio và đồng bộ khách mời VIP
+
+Các biến cấu hình được mô tả trong `backend/.env.example`. Chạy hạ tầng cục bộ bằng:
+
+```bash
+docker compose up -d postgres redis rabbitmq minio
+```
+
+MinIO API dùng cổng `9000`, giao diện quản trị dùng `http://localhost:9001`.
+
+CSV khách mời phải có đúng các header sau:
+
+```csv
+fullName,email,phone,company,eventCode,note
+Nguyen Van A,a@example.com,0900000001,Sponsor A,SKYTOUR-2026-HN,Khach moi VIP
+```
+
+Luồng AI Artist Bio dành cho tài khoản `ORGANIZER`:
+
+1. Upload PDF bằng `POST /api/v1/ai/artist-bio/concerts/:concertId/upload`, multipart field `file`.
+2. Worker trích xuất PDF, gọi Gemini và chuyển trạng thái thành `AI_GENERATED`.
+3. Xem bản sinh qua `GET /api/v1/ai/artist-bio/concerts/:concertId`.
+4. Duyệt/chỉnh sửa bằng `PATCH /api/v1/ai/artist-bio/:id/review`.
+5. Publish bằng `POST /api/v1/ai/artist-bio/:id/publish`; API chi tiết concert chỉ trả bio đã publish.
+
+Luồng VIP Guest Sync:
+
+1. Ban tổ chức quản lý email nhãn hàng qua `/api/v1/vip-guest-sync/sponsors`.
+2. Cron đọc attachment CSV từ mailbox IMAP, lưu bản gốc vào MinIO và tạo import job.
+3. Worker kiểm tra `eventCode`, email/phone và trùng lặp, sau đó sinh QR và gửi e-ticket.
+4. Ban tổ chức xem kết quả tại `/api/v1/vip-guest-sync/import-reports`.
+5. Nhân viên quét QR VIP bằng `POST /api/v1/checkins/scan` như vé thường.
