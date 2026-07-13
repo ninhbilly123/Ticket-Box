@@ -129,3 +129,188 @@ Kiến trúc TicketBox được thiết kế với tư duy **Design for Failure 
     *   *Sự cố:* Hàng đợi gửi email vé điện tử bị nghẽn (ví dụ: máy chủ SMTP từ chối kết nối).
     *   *Giải pháp:* Tác vụ gửi email được tách thành queue riêng xử lý qua background worker.
     *   *Hiệu quả cô lập:* Việc email gửi chậm không ảnh hưởng đến giao dịch thanh toán thành công hay trạng thái vé trên DB. Khán giả vẫn sở hữu vé hợp lệ và có thể quét QR trực tiếp từ giao diện "Vé của tôi" trên Web App, trong khi worker email tự động thực hiện cơ chế retry để gửi mail sau.
+
+---
+
+## 4. High-Level Architecture Diagram (Tích hợp & Ngoại tuyến)
+
+Phần này trình bày sơ đồ luồng dữ liệu (Data Flow) tổng quan của hệ thống và các trình tự xử lý (Sequence Diagrams) cho hai luồng nghiệp vụ đặc thù: tích hợp thanh toán (có ranh giới chịu lỗi) và soát vé ngoại tuyến.
+
+### A. Sơ đồ luồng dữ liệu tổng quát (Data Flow Diagram)
+
+Sơ đồ mô tả các điểm tương tác của Client, Module Backend, các hệ thống bên ngoài (VNPAY/MoMo, Gemini API, Mailbox) và các tầng lưu trữ, xử lý nền:
+
+```mermaid
+graph TB
+    subgraph Client-side
+        Customer[Customer Web App]
+        Admin[Admin Dashboard]
+        Scanner[Scanner Android App]
+    end
+
+    subgraph API-Gateway
+        Router[Express.js router]
+    end
+
+    subgraph Modular-Monolith-Backend
+        direction TB
+        AuthMod[Auth & RBAC Module]
+        ConcertMod[Concert Module]
+        OrderMod[Order & Ticket Module]
+        PayMod[Payment Module]
+        CheckinMod[Checkin Module]
+        VipMod[VIP Guest Sync Module]
+        AIMod[AI Bio Module]
+    end
+
+    subgraph External-Services
+        VNPAY[VNPAY Gateway Sandbox]
+        MoMo[MoMo Gateway Sandbox]
+        Gemini[Google Gemini API]
+        Mailbox[IMAP Mail Server]
+    end
+
+    subgraph Data-Stores
+        Postgres[(PostgreSQL Main DB)]
+        Redis[(Redis Cache & Queue)]
+        MinIO[(MinIO S3 Storage)]
+    end
+
+    subgraph Async-Workers
+        ExpirationWorker[Expiration Worker]
+        AIWorker[AI Bio Worker]
+        CSVWorker[CSV Import Worker]
+        EmailWorker[Email Worker]
+    end
+
+    %% Client calls
+    Customer -->|HTTP/REST| Router
+    Admin -->|HTTP/REST| Router
+    Scanner -->|HTTP/REST / Online Scan| Router
+    Scanner -.->|Offline Scan Storage| Scanner
+
+    %% Routing
+    Router --> AuthMod
+    Router --> ConcertMod
+    Router --> OrderMod
+    Router --> PayMod
+    Router --> CheckinMod
+    Router --> VipMod
+    Router --> AIMod
+
+    %% Integrations & Failure Boundaries
+    PayMod ===|Failure Boundary: Circuit Breaker| VNPAY
+    PayMod ===|Failure Boundary: Circuit Breaker| MoMo
+    AIWorker ===|Failure Boundary: API Exception Handling| Gemini
+    CSVWorker ===|Failure Boundary: Connection Recovery| Mailbox
+
+    %% Internal Data Reads/Writes
+    OrderMod -->|Lock/Read/Write| Postgres
+    OrderMod -->|Cache TTL / Token Check| Redis
+    CheckinMod -->|Sync Scan Logs| Postgres
+
+    %% Queuing & Workers
+    OrderMod -->|Delay Queue| ExpirationWorker
+    AIMod -->|PDF Upload| MinIO
+    AIMod -->|Job Queue| AIWorker
+    VipMod -->|CSV Download| MinIO
+    VipMod -->|CSV Job Queue| CSVWorker
+    PayMod -->|Event Publisher| EmailWorker
+    CSVWorker -->|Event Publisher| EmailWorker
+
+    %% Persistence
+    ExpirationWorker --> Postgres
+    AIWorker --> Postgres
+    CSVWorker --> Postgres
+    EmailWorker --> Postgres
+```
+
+---
+
+### B. Trình tự thanh toán & Ranh giới chịu lỗi (Payment Sequence with Failure Boundary)
+
+Khi gọi API thanh toán của đối tác MoMo hoặc VNPAY, hệ thống bọc hàm gọi qua một Circuit Breaker để cô lập lỗi nhanh nếu đối tác gặp sự cố sập hoặc nghẽn mạng:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Khán giả (Client)
+    participant Server as Backend Express
+    participant Redis as Redis Cache
+    participant VNPAY as VNPAY Cổng thanh toán
+    participant DB as PostgreSQL
+
+    User->>Server: Click Đặt vé (Xác nhận đơn hàng)
+    Note over Server: Kiểm tra Circuit Breaker trạng thái [BP11]
+    alt Circuit Breaker is OPEN (Đang ngắt mạch do đối tác lỗi liên tiếp)
+        Server-->>User: Báo lỗi: Cổng thanh toán bảo trì (Graceful Degradation)
+    else Circuit Breaker is CLOSED (Trạng thái hoạt động bình thường)
+        Server->>Redis: Atomic Decrement Quantity (Redis DECRBY) [IM11]
+        alt Vé đã hết (Quantity less than 0)
+            Server-->>User: Trả về lỗi: Loại vé này đã hết chỗ!
+        else Vé còn khả dụng (Quantity >= 0)
+            Server->>DB: Create Order (PENDING) & Set Hold
+            Server->>Redis: Set order hold TTL (10 phút)
+            Server->>VNPAY: Gọi API khởi tạo giao dịch (Idempotency Key) [BP12]
+            alt API VNPAY lỗi liên tiếp >= Ngưỡng cấu hình
+                Note over Server: Kích hoạt ngắt mạch -> CB chuyển sang OPEN
+                Server->>Redis: Khôi phục số lượng vé (Redis INCRBY)
+                Server-->>User: Trả về lỗi kết nối nhanh (Fail-fast)
+            else Kết nối VNPAY thành công
+                VNPAY-->>Server: Trả về Payment URL
+                Server-->>User: Chuyển hướng trình duyệt sang VNPAY
+                User->>VNPAY: Thực hiện thanh toán trên Sandbox
+                VNPAY->>Server: Webhook / IPN thông báo thanh toán thành công
+                Note over Server: Kiểm tra chữ ký và đối chiếu Idempotency Key
+                alt Request trùng lặp (Key đã tồn tại)
+                    Server-->>VNPAY: Trả về trạng thái IPN OK lập tức (Không xử lý lại)
+                else Request hợp lệ lần đầu
+                    Server->>DB: Cập nhật Order (PAID) & Ticket (BOOKED)
+                    Server-->>VNPAY: Phản hồi Webhook thành công (IPN OK)
+                end
+            end
+        end
+    end
+```
+
+---
+
+### C. Trình tự soát vé ngoại tuyến & Đồng bộ (Offline Scanner Sequence)
+
+Sơ đồ mô tả quy trình soát vé tại sân vận động khi không có sóng mạng, lưu log tạm tại bộ nhớ SQLite/SharedPreferences của Android App và thực hiện đồng bộ gom lô (Batch Sync) khi có mạng trở lại:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Guest as Khách tham quan
+    actor Staff as Nhân viên soát vé
+    participant App as Scanner Android App
+    participant Local as Local Storage (SharedPreferences)
+    participant Server as Backend Server
+    participant DB as PostgreSQL
+
+    Note over App: Thiết bị mất kết nối mạng (Offline)
+    Guest->>Staff: Trình QR Code E-ticket
+    Staff->>App: Quét mã QR bằng Camera (hoặc gõ token thủ công)
+    App->>Local: Lưu log quét (ticketId, scannedAtLocal, gateId, staffId)
+    Note over Local: Trạng thái log: PENDING
+    App-->>Staff: Báo hiệu quét tạm tính thành công (Yellow)
+
+    Note over App: Thiết bị có kết nối mạng trở lại
+    Staff->>App: Click nút "Đồng bộ lượt offline"
+    App->>Server: POST /api/v1/checkins/sync (gửi mảng logs)
+    Note over Server: Server sắp xếp logs tăng dần theo scannedAtLocal
+    loop Với từng log trong mảng
+        Server->>DB: Gọi checkin service để kiểm tra & cập nhật trạng thái
+        alt Vé hợp lệ & Chưa checkin
+            Server->>DB: Cập nhật Ticket = used, ghi CheckinLog (synced = true)
+            Note over Server: Kết quả: VALID
+        else Vé đã checkin trước đó (Online hoặc log trước)
+            Note over Server: Kết quả: ALREADY_USED (Conflict)
+        end
+    end
+    Server-->>App: Trả về kết quả đồng bộ (syncedCount, conflictCount, conflicts)
+    App->>Local: Cập nhật trạng thái logs thành SYNCED hoặc CONFLICT
+    App-->>Staff: Hiển thị báo cáo kết quả đồng bộ
+```
+
