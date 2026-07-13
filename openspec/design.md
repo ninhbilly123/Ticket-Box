@@ -314,3 +314,129 @@ sequenceDiagram
     App-->>Staff: Hiển thị báo cáo kết quả đồng bộ
 ```
 
+---
+
+## 5. Thiết kế Cơ sở dữ liệu & Tính nhất quán (Database Design & Consistency) [BP05]
+
+Hệ thống sử dụng chiến lược **Polyglot Persistence (Lưu trữ đa chủng loại)** để kết hợp thế mạnh của cơ sở dữ liệu quan hệ (SQL) và cơ sở dữ liệu lưu trữ trên RAM (NoSQL), đảm bảo tính toàn vẹn tài chính và hiệu năng phản hồi dưới tải cao.
+
+### A. Lựa chọn loại Database và Lý do
+
+1.  **Cơ sở dữ liệu chính: PostgreSQL (SQL Relational DB)**
+    *   *Các phân hệ áp dụng:* Quản lý người dùng, concert, cấu hình giá vé, đơn hàng, thanh toán, e-ticket và logs check-in.
+    *   *Lý do lựa chọn:* 
+        *   **Tính tuân thủ ACID chặt chẽ:** Đơn hàng và thanh toán là dữ liệu tài chính, đòi hỏi tính toàn vẹn tuyệt đối. PostgreSQL hỗ trợ các giao dịch (Transactions) mạnh mẽ và khóa dữ liệu (Row-level Locking) để loại bỏ hoàn toàn các lỗi như ghi đè hoặc thất thoát dữ liệu.
+        *   **Mối quan hệ chặt chẽ:** Dữ liệu có cấu trúc quan hệ cao (ví dụ: một Đơn hàng chứa nhiều Vé hạng VIP thuộc một Concert được tổ chức bởi một Organizer). Truy vấn SQL giúp thực hiện các phép kết hợp (JOIN) hiệu quả và thiết lập khóa ngoại (Foreign Keys) để duy trì tính nhất quán dữ liệu ở tầng lưu trữ.
+2.  **Cơ sở dữ liệu đệm & Khóa: Redis (NoSQL Key-Value/In-Memory)**
+    *   *Các phân hệ áp dụng:* Rate Limiting counter, Hàng đợi phòng chờ (Waiting Room), Khóa giữ vé tạm thời (Ticket Hold), Cache danh sách concert tĩnh.
+    *   *Lý do lựa chọn:*
+        *   **Tốc độ đáp ứng cực cao:** Dữ liệu giữ vé tạm thời thay đổi liên tục và có thời gian sống ngắn (TTL 10 phút). Ghi trực tiếp các thao tác này vào PostgreSQL dưới tải 80.000 user/5 phút sẽ làm sập DB. Redis lưu trữ hoàn toàn trên RAM giúp xử lý hàng chục nghìn thao tác đọc/ghi trong 1 giây với độ trễ < 1ms.
+        *   **Tính nguyên tử (Atomicity):** Hỗ trợ các lệnh nguyên tử như `DECRBY` / `INCRBY` để trừ tồn kho vé tức thời và an toàn mà không cần khóa bảng dữ liệu vật lý.
+3.  **Lưu trữ đối tượng: MinIO / AWS S3 (Object Storage)**
+    *   *Các phân hệ áp dụng:* File SVG sơ đồ ghế ngồi, file PDF hồ sơ nghệ sĩ, file CSV danh sách khách VIP nhãn hàng tài trợ.
+    *   *Lý do lựa chọn:* Giảm tải lưu trữ file nhị phân lớn cho PostgreSQL, giúp cơ sở dữ liệu gọn nhẹ và tối ưu hóa việc sao lưu (Backup) cũng như khôi phục (Restore).
+
+---
+
+### B. Thiết kế Schema cho các Entity quan trọng
+
+Dưới đây là thiết kế chi tiết thực thể (Schema) của các bảng chính trong hệ thống (ánh xạ trực tiếp từ file Prisma Schema [schema.prisma](file:///n:/DESIGN%20SYSTEM/DOAN/Ticket-Box-/backend/prisma/schema.prisma)):
+
+```mermaid
+erDiagram
+    User ||--o{ Order : "creates"
+    User ||--o{ Ticket : "owns"
+    User ||--o{ CheckinLog : "scans"
+    Concert ||--o{ TicketType : "defines"
+    Concert ||--o{ Order : "has"
+    TicketType ||--|| TicketInventory : "monitors"
+    Order ||--|{ OrderItem : "contains"
+    OrderItem ||--o{ Ticket : "generates"
+    Ticket ||--o{ CheckinLog : "logged"
+    
+    User {
+        uuid id PK
+        string email UK
+        string passwordHash
+        string fullName
+        string phone
+        string role "ADMIN | ORGANIZER | CHECKIN_STAFF | AUDIENCE"
+        datetime createdAt
+    }
+    
+    Concert {
+        uuid id PK
+        uuid organizerId FK
+        string name
+        string venue
+        datetime startAt
+        datetime saleOpenAt
+        string status "DRAFT | PUBLISHED | ON_SALE | CONCLUDED | CANCELLED"
+        string eventCode UK
+    }
+    
+    TicketType {
+        uuid id PK
+        uuid concertId FK
+        string name "VIP | SVIP | GA | CAT1"
+        string zoneCode
+        decimal price
+        int totalQuantity
+        int maxPerAccount
+    }
+
+    TicketInventory {
+        uuid ticketTypeId PK, FK
+        int totalQuantity
+        int availableQuantity
+        int reservedQuantity
+        int soldQuantity
+    }
+    
+    Order {
+        uuid id PK
+        uuid userId FK
+        uuid concertId FK
+        string status "pending | paid | expired | cancelled"
+        decimal totalAmount
+        string idempotencyKey UK
+        datetime createdAt
+        datetime paidAt
+    }
+    
+    OrderItem {
+        uuid id PK
+        uuid orderId FK
+        uuid ticketTypeId FK
+        int quantity
+        decimal unitPrice
+    }
+    
+    Ticket {
+        uuid id PK
+        uuid orderItemId FK
+        uuid userId FK
+        string seatNumber
+        string qrCode UK
+        string status "valid | used | cancelled"
+        datetime issuedAt
+        datetime usedAt
+    }
+    
+    CheckinLog {
+        uuid id PK
+        uuid ticketId FK
+        uuid gateStaffId FK
+        string deviceId
+        boolean synced
+        datetime scannedAtLocal
+        datetime syncedAt
+    }
+```
+
+#### Mô tả chi tiết mối quan hệ và Ràng buộc nhất quán (Consistency Constraints):
+*   **TicketInventory (Tồn kho vé):** Sử dụng quan hệ 1-1 với `TicketType`. Trường `availableQuantity` đại diện cho số lượng vé thực sự còn trống để bán và được liên tục đồng bộ giảm khi có lệnh `DECRBY` trên Redis trong luồng giữ vé.
+*   **Idempotency Key:** Cấu hình unique (`UK`) trên trường `idempotencyKey` của bảng `Order` và bảng `Payment` để đảm bảo cơ chế không ghi trùng dữ liệu ở mức Database vật lý (ngăn chặn double inserts do lỗi mạng).
+*   **Mối liên kết soát vé (CheckinLog):** Bảng `CheckinLog` liên kết trực tiếp tới `Ticket` (quan hệ 1-n) để lưu lại dấu vết lịch sử quét vé của nhân sự soát vé (`gateStaffId`), hỗ trợ đối soát chéo và xử lý xung đột ngoại tuyến.
+
+
