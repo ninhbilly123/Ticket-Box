@@ -340,7 +340,7 @@ Hệ thống sử dụng chiến lược **Polyglot Persistence (Lưu trữ đa 
 
 ### B. Thiết kế Schema cho các Entity quan trọng
 
-Dưới đây là thiết kế chi tiết thực thể (Schema) của các bảng chính trong hệ thống (ánh xạ trực tiếp từ file Prisma Schema [schema.prisma](file:///n:/DESIGN%20SYSTEM/DOAN/Ticket-Box-/backend/prisma/schema.prisma)):
+Dưới đây là thiết kế chi tiết thực thể (Schema) của các bảng chính trong hệ thống (ánh xạ trực tiếp từ sơ đồ cơ sở dữ liệu quan hệ):
 
 ```mermaid
 erDiagram
@@ -497,7 +497,31 @@ Hệ thống kết hợp cơ chế Phòng chờ ảo (Waiting Room) và bộ l�
         ```
 
 ### Chống trừ tiền hai lần
-<!-- Cách sinh key, nơi lưu trữ, TTL, xử lý trùng lặp -->
+Để ngăn ngừa tình trạng trừ tiền hai lần của khách hàng (Double Charge) do lỗi mạng hoặc nhấn nút thanh toán/đặt vé nhiều lần, TicketBox triển khai cơ chế chống trùng lặp tại cả 3 tầng của hệ thống:
+
+#### 1. Tầng API Router (Express Middleware)
+*   **Cơ chế:** Sử dụng mã định danh giao dịch duy nhất **Idempotency-Key** đính kèm dưới dạng HTTP Header trong các request sửa đổi trạng thái (POST/PUT/PATCH).
+*   **Nơi lưu trữ:** Bộ đệm **Redis Cache** dưới dạng key-value `idempotency:${idempotencyKey}`.
+*   **TTL (Thời gian sống):**
+    *   Trạng thái đang thực thi khóa: **120 giây** (lệnh `SET idempotency:${key} "PROCESSING" EX 120 NX` để chặn lock đồng thời).
+    *   Trạng thái hoàn thành giao dịch: **24 giờ** (86.400 giây) để cache phản hồi kết quả.
+*   **Luồng xử lý khi phát hiện trùng lặp:**
+    *   *Khi đang xử lý:* Nếu key Redis có giá trị là `"PROCESSING"`, trả về mã lỗi **`HTTP 409 Conflict`** kèm thông điệp: *"Yêu cầu trùng lặp đang được xử lý, vui lòng thử lại sau ít phút."*.
+    *   *Khi đã hoàn thành:* Nếu key Redis chứa chuỗi JSON kết quả cũ, middleware lập tức parse và trả lại kết quả HTTP cũ (status code và body) mà không cho request tiếp cận controller hay database.
+
+#### 2. Tầng Database (PostgreSQL Constraint)
+*   **Cơ chế:** Sử dụng ràng buộc duy nhất vật lý **`UNIQUE`** trên cột `idempotencyKey` của bảng `orders` dưới PostgreSQL.
+*   **Nơi lưu trữ:** Database PostgreSQL chính.
+*   **Luồng xử lý khi phát hiện trùng lặp:** 
+    *   Nếu hai yêu cầu ghi đè (double write) cùng lúc vượt qua được lớp lock Redis, PostgreSQL sẽ kích hoạt lỗi vi phạm ràng buộc unique (Unique Constraint Violation).
+    *   Tầng Backend sẽ bắt lỗi vi phạm ràng buộc duy nhất này, thực hiện truy vấn đơn hàng đã tồn tại dựa theo key đó để trả về kết quả cũ thay vì ghi đè hay báo lỗi hệ thống.
+
+#### 3. Tầng Webhook Cổng thanh toán (VNPAY/MoMo IPN Callback)
+*   **Cơ chế:** Kiểm tra trạng thái bản ghi Payment trước khi xử lý IPN cập nhật hóa đơn.
+*   **Nơi lưu trữ:** Cột `status` của bảng `Payment` trong PostgreSQL.
+*   **Luồng xử lý khi phát hiện trùng lặp:**
+    *   Khi cổng thanh toán gọi lại webhook báo kết quả giao dịch, hệ thống truy vấn và kiểm tra `payment.status`.
+    *   Nếu trạng thái khác `PENDING` (đã là `SUCCESS` hoặc `FAILED`), hệ thống bỏ qua logic cập nhật và phản hồi thành công ngay lập tức cho đối tác (`{ RspCode: '02', Message: 'Order already confirmed' }`), ngăn chặn việc xử lý giao dịch trùng lặp và gửi vé QR lần thứ 2.
 
 ### Caching
 <!-- Mô hình (Cache-aside/Write-through), xử lý bất đồng nhất, TTL, Invalidate -->
