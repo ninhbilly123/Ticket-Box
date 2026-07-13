@@ -455,12 +455,46 @@ erDiagram
     *   *HALF-OPEN $\rightarrow$ CLOSED:* Nếu **5 request** thử nghiệm liên tiếp thành công 100%.
     *   *HALF-OPEN $\rightarrow$ OPEN:* Nếu có **bất kỳ 1 request** thử nghiệm nào thất bại.
 3.  **Hành vi khi xảy ra lỗi (Graceful Degradation / Fallback):**
-    *   *Đối với luồng thanh toán:* Hệ thống trả về lỗi nhanh (Fail-fast): *"Hệ thống thanh toán đang bảo trì, vui lòng chọn phương thức thanh toán khác hoặc thử lại sau"*. Đồng thời, số vé giữ tạm trên RAM Redis sẽ được phục vụ khôi phục ngay lập tức bằng lệnh nguyên tử `INCRBY` (tránh chiếm kho vé).
+    *   *Đối với luồng thanh toán:* Hệ thống trả về lỗi nhanh (Fail-fast): *"Hệ thống thanh toán đang bảo trì, vui lòng chọn phương thức thanh toán khác hoặc thử lại sau"*. Đồng thời, đơn hàng sẽ được cập nhật trạng thái thành CANCELLED và giải phóng lượng vé đã giữ dưới database PostgreSQL (đưa availableQuantity tăng lại và reservedQuantity giảm lại).
     *   *Đối với toàn bộ hệ thống:* Toàn bộ các dịch vụ công cộng khác như duyệt danh sách concert, lọc tìm kiếm, xem trang chi tiết nghệ sĩ vẫn hoạt động bình thường do được cô lập và phục vụ độc lập qua bộ nhớ đệm cache Redis.
 
 
 ### Kiểm soát tải đột biến
-<!-- Thuật toán, cấu hình ngưỡng, key giới hạn, hành vi -->
+Hệ thống kết hợp cơ chế Phòng chờ ảo (Waiting Room) và bộ lọc giới hạn tần suất (Rate Limiting) để bảo vệ API không bị quá tải khi lượng truy cập đồng thời tăng vọt.
+
+#### 1. Cơ chế Phòng chờ ảo (Waiting Room)
+*   **Giải pháp:** Sử dụng hàng đợi trung gian trên bộ nhớ RAM Redis để xếp hàng cho người dùng truy cập các Concert "hot" (ON_SALE/PUBLISHED), tránh việc hàng chục ngàn người cùng lúc gửi yêu cầu ghi trực tiếp xuống database PostgreSQL.
+*   **Thuật toán:** **Leaky Bucket / Queue Release (Hàng đợi xả tải có điều tiết)** sử dụng cấu trúc dữ liệu **Redis Sorted Set (ZSET)**:
+    *   Người dùng được thêm vào hàng đợi bằng lệnh `ZADD` với score là `Date.now()`.
+    *   Vị trí xếp hàng được kiểm tra bằng lệnh `ZRANK` để hiển thị số thứ tự chờ tương đối trên giao diện Client.
+    *   Mỗi chu kỳ (tiến trình worker nền chạy định kỳ), hệ thống lấy ra một cụm giới hạn người dùng đứng đầu hàng đợi bằng `ZRANGE` và xóa bằng `ZREM`.
+    *   Hệ thống cấp phát mã token UUID ngẫu nhiên và lưu vào Redis dạng `checkout_token:${concertId}:${userId}` để cho phép người dùng vào luồng checkout.
+*   **Ngưỡng (Thresholds):**
+    *   Tần suất giải phóng hàng chờ: Mặc định **500 user/phút** (cấu hình qua biến môi trường `WAITING_ROOM_RELEASE_PER_MINUTE`).
+    *   Thời gian hiệu lực của Checkout Token: **5 phút** (300 giây, cấu hình qua `CHECKOUT_TOKEN_TTL_SECONDS`).
+*   **Hành vi khi vượt ngưỡng / Chưa tới lượt:**
+    *   Người dùng chưa được giải phóng khỏi hàng chờ ảo sẽ ở trạng thái chờ (`status: 'WAITING'`) trên giao diện đếm ngược tĩnh của client.
+    *   Nếu client cố tình gọi trực tiếp API `/orders/hold` mà không gửi kèm Checkout Token hợp lệ trong HTTP Header, middleware `requireCheckoutTokenForHotConcert` sẽ lập tức chặn đứng request và trả về lỗi **`HTTP 403 Forbidden`** với mã lỗi `NOT_YOUR_TURN` hoặc `CHECKOUT_TOKEN_EXPIRED`.
+
+#### 2. Cơ chế Giới hạn Tần suất Request (Rate Limiting)
+*   **Giải pháp:** Áp dụng middleware kiểm tra tại tầng Express Router trước khi xử lý logic nghiệp vụ đặt vé để bảo vệ tài nguyên hạ nguồn.
+*   **Thuật toán:** **Fixed Window (Cửa sổ cố định)** sử dụng lệnh nguyên tử `INCR` và `EXPIRE` trên bộ đệm Redis.
+*   **Ngưỡng (Thresholds):**
+    *   *Giới hạn theo Tài khoản (`User_ID`):* Tối đa **5 requests / 60 giây** (Key: `rate_limit:user:{userId}:hold-order`).
+    *   *Giới hạn theo địa chỉ IP (`Client_IP`):* Tối đa **20 requests / 60 giây** (Key: `rate_limit:ip:{clientIp}:hold-order`).
+*   **Hành vi khi vượt ngưỡng:**
+    *   Khi số đếm vượt quá ngưỡng, hệ thống lập tức chặn request tại middleware và trả về lỗi **`HTTP 429 Too Many Requests`** kèm cấu trúc phản hồi lỗi JSON:
+        ```json
+        {
+          "success": false,
+          "errorCode": "TOO_MANY_REQUESTS",
+          "message": "Bạn gửi quá nhiều request, vui lòng thử lại sau.",
+          "error": {
+            "code": "TOO_MANY_REQUESTS",
+            "message": "Bạn gửi quá nhiều request, vui lòng thử lại sau."
+          }
+        }
+        ```
 
 ### Chống trừ tiền hai lần
 <!-- Cách sinh key, nơi lưu trữ, TTL, xử lý trùng lặp -->
