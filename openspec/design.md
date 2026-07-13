@@ -524,4 +524,32 @@ Hệ thống kết hợp cơ chế Phòng chờ ảo (Waiting Room) và bộ l�
     *   Nếu trạng thái khác `PENDING` (đã là `SUCCESS` hoặc `FAILED`), hệ thống bỏ qua logic cập nhật và phản hồi thành công ngay lập tức cho đối tác (`{ RspCode: '02', Message: 'Order already confirmed' }`), ngăn chặn việc xử lý giao dịch trùng lặp và gửi vé QR lần thứ 2.
 
 ### Caching
-<!-- Mô hình (Cache-aside/Write-through), xử lý bất đồng nhất, TTL, Invalidate -->
+Hệ thống áp dụng cơ chế bộ nhớ đệm để giảm tải truy vấn cho PostgreSQL chính, đảm bảo tốc độ phản hồi nhanh đối với các API đọc dữ liệu.
+
+#### 1. Chiến lược Caching
+Hệ thống sử dụng mô hình **Cache-aside (Đọc đệm từ bên cạnh)** cho toàn bộ luồng đọc dữ liệu:
+*   Khi có yêu cầu đọc (Read request), hệ thống kiểm tra dữ liệu trong Redis Cache trước.
+*   *Nếu có (Cache Hit):* Trả về kết quả ngay lập tức cho client.
+*   *Nếu không có (Cache Miss):* Thực hiện truy vấn dữ liệu thực tế từ PostgreSQL DB, ghi kết quả ngược lại vào Redis Cache kèm thời gian sống (TTL) xác định, sau đó trả về cho client.
+
+#### 2. Các đối tượng cần cache và TTL (Time to Live)
+
+| Đối tượng cần cache | Cấu trúc Redis Key | TTL mặc định | Lý do & Cấu hình |
+| :--- | :--- | :--- | :--- |
+| **Danh sách Concert** (Có tìm kiếm/lọc) | `concert:list:${sha256(filters)}` | **60 giây** | Cấu hình qua biến `CONCERT_LIST_CACHE_TTL`. Dùng Set `concert:list:keys` để lưu trữ tất cả các filter keys phục vụ invalidate hàng loạt. |
+| **Chi tiết Concert** (Nội dung đêm nhạc) | `concert:detail:${concertId}` | **120 giây** | Cấu hình qua `CONCERT_DETAIL_CACHE_TTL` (giới hạn trong khoảng [60, 300] giây). Dữ liệu tĩnh, ít biến động. |
+| **Tóm tắt số vé khả dụng của Concert** | `ticket:availability:${concertId}` | **5 giây** | Cấu hình qua `CONCERT_AVAILABILITY_CACHE_TTL` (giới hạn [3, 5] giây). Thời gian sống cực ngắn giúp giao diện cập nhật nhanh số vé còn lại. |
+| **Số lượng vé trống từng loại vé** | `ticket_inventory:${ticketTypeId}` | **30 giây** | Tần suất đọc lớn khi người dùng chọn phân hạng vé. |
+
+#### 3. Cơ chế Invalidate (Xóa bỏ Cache khi dữ liệu thay đổi)
+
+Để tránh hiện tượng bất đồng nhất dữ liệu (Stale Data), hệ thống chủ động xóa key cache (lệnh `DEL`) khi có các sự kiện thay đổi trạng thái:
+
+*   **Khi phát sinh giao dịch đặt giữ vé hoặc thanh toán (Ảnh hưởng số lượng vé):**
+    *   *Khi giữ vé thành công:* Hệ thống kích hoạt xóa key cache tóm tắt vé khả dụng `ticket:availability:${concertId}`.
+    *   *Khi thanh toán thành công/thất bại:* Hệ thống thực hiện xóa key tồn kho của loại vé tương ứng (`ticket_inventory:${ticketTypeId}`) và xóa key tóm tắt vé khả dụng của concert đó.
+    *   *Khi đơn hàng hết hạn (Expired) hoặc dọn dẹp:* Tiến trình Worker nền tự động giải phóng vé dưới DB và xóa key cache `ticket:availability:${concertId}` để cập nhật lại số lượng thực tế.
+*   **Khi ban tổ chức cập nhật thông tin Concert (Sửa thông tin, thay đổi sơ đồ phân khu):**
+    *   Hệ thống phát sự kiện lên RabbitMQ. Một Worker chạy nền lắng nghe sự kiện này và thực hiện:
+        1.  Truy vấn toàn bộ danh sách filter keys từ Redis Set `concert:list:keys` bằng lệnh `SMEMBERS`, sau đó thực hiện xóa hàng loạt (`DEL`) toàn bộ cache danh sách concert.
+        2.  Xóa bỏ key chi tiết concert `concert:detail:${concertId}` và key tóm tắt vé khả dụng `ticket:availability:${concertId}` để nạp lại dữ liệu mới nhất.
