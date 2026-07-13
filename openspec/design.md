@@ -132,7 +132,7 @@ Kiến trúc TicketBox được thiết kế với tư duy **Design for Failure 
 
 ---
 
-## 4. High-Level Architecture Diagram (Tích hợp & Ngoại tuyến)
+## High-Level Architecture Diagram (Tích hợp & Ngoại tuyến)
 
 Phần này trình bày sơ đồ luồng dữ liệu (Data Flow) tổng quan của hệ thống và các trình tự xử lý (Sequence Diagrams) cho hai luồng nghiệp vụ đặc thù: tích hợp thanh toán (có ranh giới chịu lỗi) và soát vé ngoại tuyến.
 
@@ -316,7 +316,7 @@ sequenceDiagram
 
 ---
 
-## 5. Thiết kế Cơ sở dữ liệu & Tính nhất quán (Database Design & Consistency) [BP05]
+## Thiết kế Cơ sở dữ liệu 
 
 Hệ thống sử dụng chiến lược **Polyglot Persistence (Lưu trữ đa chủng loại)** để kết hợp thế mạnh của cơ sở dữ liệu quan hệ (SQL) và cơ sở dữ liệu lưu trữ trên RAM (NoSQL), đảm bảo tính toàn vẹn tài chính và hiệu năng phản hồi dưới tải cao.
 
@@ -440,3 +440,30 @@ erDiagram
 *   **Mối liên kết soát vé (CheckinLog):** Bảng `CheckinLog` liên kết trực tiếp tới `Ticket` (quan hệ 1-n) để lưu lại dấu vết lịch sử quét vé của nhân sự soát vé (`gateStaffId`), hỗ trợ đối soát chéo và xử lý xung đột ngoại tuyến.
 
 
+## Thiết kế các cơ chế bảo vệ hệ thống
+
+### Xử lý cổng thanh toán không ổn định
+Để bảo vệ hệ thống trước sự cố nghẽn mạng hoặc sập dịch vụ từ cổng thanh toán đối tác (VNPAY/MoMo), TicketBox áp dụng mô hình **Circuit Breaker (Bộ ngắt mạch)** kết hợp phương án giảm cấp trải nghiệm **Graceful Degradation (Fallback)**.
+
+1.  **Các trạng thái của Bộ ngắt mạch (Circuit Breaker States):**
+    *   **CLOSED (Mạch đóng):** Dịch vụ hoạt động bình thường. Mọi yêu cầu gọi sang cổng thanh toán đối tác đều được thực thi và giám sát.
+    *   **OPEN (Ngắt mạch):** Khi phát hiện cổng thanh toán đối tác bị lỗi liên tục đạt ngưỡng kích hoạt, bộ ngắt mạch lập tức chuyển sang trạng thái OPEN. Mọi yêu cầu thanh toán mới sẽ bị chặn và trả về lỗi ngay lập tức (Fail-fast).
+    *   **HALF-OPEN (Mạch hé mở):** Sau một thời gian chờ phục hồi (Cooldown Period - mặc định 60 giây), bộ ngắt mạch tự động chuyển sang HALF-OPEN và cho phép một số lượng giới hạn request thử nghiệm đi qua để kiểm tra xem hệ thống đối tác đã ổn định chưa.
+2.  **Ngưỡng kích hoạt chuyển đổi trạng thái (Thresholds):**
+    *   *CLOSED $\rightarrow$ OPEN:* Khi phát hiện kết nối tới API MoMo/VNPAY gặp lỗi kết nối/timeout liên tiếp **5 lần** (hoặc tỷ lệ lỗi vượt quá **50%** trong số 20 request gần nhất).
+    *   *OPEN $\rightarrow$ HALF-OPEN:* Chờ hết thời gian Cooldown **60 giây**.
+    *   *HALF-OPEN $\rightarrow$ CLOSED:* Nếu **5 request** thử nghiệm liên tiếp thành công 100%.
+    *   *HALF-OPEN $\rightarrow$ OPEN:* Nếu có **bất kỳ 1 request** thử nghiệm nào thất bại.
+3.  **Hành vi khi xảy ra lỗi (Graceful Degradation / Fallback):**
+    *   *Đối với luồng thanh toán:* Hệ thống trả về lỗi nhanh (Fail-fast): *"Hệ thống thanh toán đang bảo trì, vui lòng chọn phương thức thanh toán khác hoặc thử lại sau"*. Đồng thời, số vé giữ tạm trên RAM Redis sẽ được phục vụ khôi phục ngay lập tức bằng lệnh nguyên tử `INCRBY` (tránh chiếm kho vé).
+    *   *Đối với toàn bộ hệ thống:* Toàn bộ các dịch vụ công cộng khác như duyệt danh sách concert, lọc tìm kiếm, xem trang chi tiết nghệ sĩ vẫn hoạt động bình thường do được cô lập và phục vụ độc lập qua bộ nhớ đệm cache Redis.
+
+
+### Kiểm soát tải đột biến
+<!-- Thuật toán, cấu hình ngưỡng, key giới hạn, hành vi -->
+
+### Chống trừ tiền hai lần
+<!-- Cách sinh key, nơi lưu trữ, TTL, xử lý trùng lặp -->
+
+### Caching
+<!-- Mô hình (Cache-aside/Write-through), xử lý bất đồng nhất, TTL, Invalidate -->
