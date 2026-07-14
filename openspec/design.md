@@ -187,10 +187,11 @@ graph TB
         Worker[Background Job Worker<br/>BullMQ / Node.js]
     end
 
-    subgraph Storage [Tầng Lưu trữ]
+    subgraph Storage [Tầng Lưu trữ & Message Broker]
         Postgres[(PostgreSQL Main DB)]
         Redis[(Redis Cache & Queue)]
         MinIO[(MinIO S3 Object Storage)]
+        RabbitMQ[(RabbitMQ Message Broker)]
     end
 
     subgraph External [Hệ thống tích hợp ngoài]
@@ -209,11 +210,13 @@ graph TB
     API -->|Read/Write Data| Postgres
     API -->|Enqueue Jobs / Cache TTL| Redis
     API -->|Upload PDF / Save CSV| MinIO
+    API -->|Publish Events| RabbitMQ
 
     %% Worker Interactions
     Worker -->|Process Queue Jobs| Redis
     Worker -->|Fetch Objects| MinIO
     Worker -->|Update Status / Save Tickets| Postgres
+    Worker -->|Subscribe & Listen Events| RabbitMQ
 
     %% External Connections
     API -->|Create Payment Link| VNPAY
