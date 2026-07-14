@@ -5,6 +5,15 @@ import Link from 'next/link';
 import { Calendar, MapPin, Music, Search, SlidersHorizontal, RefreshCw } from 'lucide-react';
 import { Concert, fetchConcerts } from '../../lib/api';
 
+const getConcertImage = (title: string): string => {
+  const normalized = title?.toLowerCase() || '';
+  if (normalized.includes('sky tour')) return '/concert-4.png';
+  if (normalized.includes('show cua den') || normalized.includes('show của đen') || normalized.includes('đen vâu') || normalized.includes('den vau')) return '/concert-5.png';
+  if (normalized.includes('tri am') || normalized.includes('mỹ tâm') || normalized.includes('my tam')) return '/concert-6.png';
+  if (normalized.includes('mtp special') || normalized.includes('special night')) return '/concert-7.png';
+  return '/concert-4.png'; // default fallback
+};
+
 export default function ConcertListingPage() {
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,9 +224,14 @@ export default function ConcertListingPage() {
                   aria-label={`Xem thông tin chi tiết ${concert.title}`}
                   className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden hover:border-indigo-500/50 hover:shadow-xl hover:shadow-indigo-950/20 transition-all duration-300 flex flex-col h-full group"
                 >
-                  {/* Decorative Banner/Card image replacement */}
-                  <div className="h-36 bg-gradient-to-r from-purple-800 via-indigo-950 to-indigo-900 relative p-6 flex flex-col justify-end">
-                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors"></div>
+                  {/* Concert Banner Image */}
+                  <div className="h-48 relative overflow-hidden flex flex-col justify-end p-6">
+                    <img 
+                      src={getConcertImage(concert.title)} 
+                      alt={concert.title}
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent"></div>
                     <div className="relative z-10 flex items-center gap-1.5 text-xs text-purple-300 font-bold bg-purple-950/60 w-fit px-2.5 py-1 rounded-full border border-purple-800/50">
                       <Music className="w-3 h-3" />
                       LIVE SHOW
