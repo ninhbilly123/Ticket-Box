@@ -11,6 +11,7 @@ export async function startOrderExpirationWorker() {
     await channel.consume(ORDER_EXPIRE_QUEUE, async (message: ConsumeMessage | null) => {
       if (!message) return;
 
+      let orderId: string | undefined;
       try {
         const parsed = JSON.parse(message.content.toString()) as { type?: string; orderId?: string };
         if (parsed.type !== 'EXPIRE_ORDER' || !parsed.orderId) {
@@ -19,7 +20,8 @@ export async function startOrderExpirationWorker() {
           return;
         }
 
-        const result = await orderHoldService.expireOrderIfDue(parsed.orderId);
+        orderId = parsed.orderId;
+        const result = await orderHoldService.expireOrderIfDue(orderId);
         if (result.result === 'not_due') {
           await publishOrderExpirationJob(result.orderId, result.remainingMs);
         }
@@ -28,11 +30,16 @@ export async function startOrderExpirationWorker() {
           await invalidateTicketAvailabilityCache(result.concertId, 'order.expired');
         }
 
-        console.log(`[Order Expiration Worker] Processed order ${parsed.orderId}: ${result.result}`);
+        console.log(`[Order Expiration Worker] Processed order ${orderId}: ${result.result}`);
         channel.ack(message);
-      } catch (error) {
-        console.error('[Order Expiration Worker] Failed to process message', error);
-        channel.nack(message, false, false);
+      } catch (error: any) {
+        if (error?.errorCode === 'ORDER_NOT_FOUND') {
+          console.warn(`[Order Expiration Worker] Order ${orderId || 'unknown'} not found (might have been deleted during tests). Acknowledging message.`);
+          channel.ack(message);
+        } else {
+          console.error('[Order Expiration Worker] Failed to process message', error);
+          channel.nack(message, false, false);
+        }
       }
     });
 

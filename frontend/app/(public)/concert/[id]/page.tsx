@@ -15,6 +15,15 @@ import {
 } from 'lucide-react';
 import { Concert, fetchConcertById } from '../../../../lib/api';
 
+const getConcertImage = (title: string): string => {
+  const normalized = title?.toLowerCase() || '';
+  if (normalized.includes('sky tour')) return '/concert-4.png';
+  if (normalized.includes('show cua den') || normalized.includes('show của đen') || normalized.includes('đen vâu') || normalized.includes('den vau')) return '/concert-5.png';
+  if (normalized.includes('tri am') || normalized.includes('mỹ tâm') || normalized.includes('my tam')) return '/concert-6.png';
+  if (normalized.includes('mtp special') || normalized.includes('special night')) return '/concert-7.png';
+  return '/concert-4.png'; // default fallback
+};
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString('vi-VN', {
     day: '2-digit',
@@ -106,6 +115,16 @@ export default function ConcertDetailPage() {
         {/* Title Section */}
         <div className="text-center">
           <h1 className="text-3xl md:text-5xl font-extrabold text-white break-words">{concert.title}</h1>
+        </div>
+
+        {/* Concert Banner Image */}
+        <div className="w-full h-64 md:h-96 rounded-3xl overflow-hidden relative border border-gray-800 shadow-2xl">
+          <img 
+            src={getConcertImage(concert.title)} 
+            alt={concert.title} 
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
         </div>
 
         {/* Other Details Section */}
