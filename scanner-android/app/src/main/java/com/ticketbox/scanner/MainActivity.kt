@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
     private val requestCameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startCamera() else toast("Can cap quyen camera de quet QR.")
+        if (granted) startCamera() else toast("Cần cấp quyền camera để quét QR.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
         setContentView(scroll)
 
         root.addView(text("TicketBox Scanner", 24, true))
-        root.addView(text("App Android native cho nhan vien soat ve.", 14, false).muted())
+        root.addView(text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted())
 
         progressBar = ProgressBar(this).apply {
             visibility = View.GONE
@@ -133,37 +133,37 @@ class MainActivity : ComponentActivity() {
         root.addView(statusText)
 
         loginPanel = verticalPanel()
-        apiUrlInput = input("API URL, vi du: http://192.168.1.5:3000/api/v1", apiClient.baseUrl)
-        emailInput = input("Email nhan vien", "staff@example.com")
-        passwordInput = input("Mat khau", "Password123!")
+        apiUrlInput = input("API URL, ví dụ: http://192.168.1.5:3000/api/v1", apiClient.baseUrl)
+        emailInput = input("Email nhân viên", "staff@example.com")
+        passwordInput = input("Mật khẩu", "Password123!")
         loginPanel.addView(label("API base URL"))
         loginPanel.addView(apiUrlInput)
-        loginPanel.addView(button("Luu API URL") { saveApiUrl() })
-        loginPanel.addView(label("Dang nhap"))
+        loginPanel.addView(button("Lưu API URL") { saveApiUrl() })
+        loginPanel.addView(label("Đăng nhập"))
         loginPanel.addView(emailInput)
         loginPanel.addView(passwordInput)
-        loginPanel.addView(button("Dang nhap") { login() })
+        loginPanel.addView(button("Đăng nhập") { login() })
         root.addView(loginPanel)
 
         scannerPanel = verticalPanel()
-        scannerPanel.addView(button("Dang xuat") { logout() })
-        scannerPanel.addView(label("Concert duoc phan cong"))
+        scannerPanel.addView(button("Đăng xuất") { logout() })
+        scannerPanel.addView(label("Sự kiện được phân công"))
         concertSpinner = Spinner(this)
         scannerPanel.addView(concertSpinner, matchWrap())
-        scannerPanel.addView(label("Cong soat ve"))
+        scannerPanel.addView(label("Cổng soát vé"))
         gateSpinner = Spinner(this)
         scannerPanel.addView(gateSpinner, matchWrap())
-        scannerPanel.addView(button("Tai lai phan cong") { loadAssignedConcerts() })
+        scannerPanel.addView(button("Tải lại phân công") { loadAssignedConcerts() })
 
         resultText = text("", 16, true)
         scannerPanel.addView(resultText)
 
-        manualCodeInput = input("Dan QR token hoac ma ve", "")
-        scannerPanel.addView(label("Nhap ma thu cong"))
+        manualCodeInput = input("Dán QR token hoặc mã vé", "")
+        scannerPanel.addView(label("Nhập mã thủ công"))
         scannerPanel.addView(manualCodeInput)
-        scannerPanel.addView(button("Soat ve thu cong") { submitManualCode() })
-        scannerPanel.addView(button("Mo camera quet QR") { openCamera() })
-        scannerPanel.addView(button("Dong camera") { stopCamera() })
+        scannerPanel.addView(button("Soát vé thủ công") { submitManualCode() })
+        scannerPanel.addView(button("Mở camera quét QR") { openCamera() })
+        scannerPanel.addView(button("Đóng camera") { stopCamera() })
 
         cameraContainer = verticalPanel().apply { visibility = View.GONE }
         previewView = PreviewView(this)
@@ -172,8 +172,8 @@ class MainActivity : ComponentActivity() {
 
         queueText = text("", 14, false)
         scannerPanel.addView(queueText)
-        scannerPanel.addView(button("Dong bo luot offline") { syncOfflineQueue() })
-        scannerPanel.addView(button("Don luot da sync") { clearResolvedQueue() })
+        scannerPanel.addView(button("Đồng bộ lượt ngoại tuyến") { syncOfflineQueue() })
+        scannerPanel.addView(button("Dọn lượt đã đồng bộ") { clearResolvedQueue() })
         root.addView(scannerPanel)
     }
 
@@ -182,9 +182,9 @@ class MainActivity : ComponentActivity() {
         loginPanel.visibility = if (loggedIn) View.GONE else View.VISIBLE
         scannerPanel.visibility = if (loggedIn) View.VISIBLE else View.GONE
         statusText.text = if (loggedIn) {
-            "Da dang nhap. Device: $deviceId. Mang: ${if (isOnline()) "online" else "offline"}"
+            "Đã đăng nhập. Thiết bị: $deviceId. Mạng: ${if (isOnline()) "trực tuyến" else "ngoại tuyến"}"
         } else {
-            "Chua dang nhap. Hay nhap API URL bang IP LAN cua laptop."
+            "Chưa đăng nhập. Hãy nhập API URL bằng IP LAN của laptop."
         }
         renderQueue()
     }
@@ -195,9 +195,9 @@ class MainActivity : ComponentActivity() {
             apiClient = ApiClient(normalized)
             apiUrlInput.setText(normalized)
             prefs.edit().putString("apiBaseUrl", normalized).apply()
-            toast("Da luu API URL.")
+            toast("Đã lưu API URL.")
         } catch (error: Exception) {
-            toast(error.message ?: "API URL khong hop le.")
+            toast(error.message ?: "API URL không hợp lệ.")
         }
     }
 
@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity() {
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
         if (email.isBlank() || password.isBlank()) {
-            toast("Vui long nhap email va mat khau.")
+            toast("Vui lòng nhập email và mật khẩu.")
             return
         }
 
@@ -217,7 +217,7 @@ class MainActivity : ComponentActivity() {
             val data = apiClient.request("/auth/login", "POST", body, null) as JSONObject
             val user = data.getJSONObject("user")
             if (user.getString("role") != "CHECKIN_STAFF") {
-                throw IllegalStateException("Tai khoan nay khong co quyen soat ve.")
+                throw IllegalStateException("Tài khoản này không có quyền soát vé.")
             }
             accessToken = data.getString("accessToken")
             userId = user.getString("id")
@@ -266,7 +266,7 @@ class MainActivity : ComponentActivity() {
             selectedGateId = selectedConcert?.gateIds?.firstOrNull()
             withContext(Dispatchers.Main) {
                 renderConcertSpinners()
-                toast("Da tai ${concerts.size} concert.")
+                toast("Đã tải ${concerts.size} sự kiện.")
             }
         }
     }
@@ -310,12 +310,12 @@ class MainActivity : ComponentActivity() {
         val gateId = selectedGateId
         val token = accessToken
         if (ticketId.isBlank() || concertId.isNullOrBlank() || gateId.isNullOrBlank() || token == null) {
-            toast("Can chon concert/gate va nhap ma ve.")
+            toast("Cần chọn sự kiện/cổng soát vé và nhập mã vé.")
             return
         }
 
         if (!isOnline()) {
-            enqueueOffline(ticketId, "Thiet bi dang offline.")
+            enqueueOffline(ticketId, "Thiết bị đang ngoại tuyến.")
             return
         }
 
@@ -330,7 +330,7 @@ class MainActivity : ComponentActivity() {
                 val data = apiClient.request("/checkins/scan", "POST", body, token) as JSONObject
                 withContext(Dispatchers.Main) { renderScanResult(data) }
             } catch (error: Exception) {
-                enqueueOffline(ticketId, error.message ?: "Khong goi duoc backend.")
+                enqueueOffline(ticketId, error.message ?: "Không kết nối được với backend.")
             }
         }
     }
@@ -338,13 +338,13 @@ class MainActivity : ComponentActivity() {
     private fun renderScanResult(data: JSONObject) {
         val status = data.optString("status", "INVALID_TICKET")
         resultText.text = when (status) {
-            "VALID" -> "Hop le: da check-in thanh cong."
-            "ALREADY_USED" -> "Ve da duoc su dung truoc do."
-            "WRONG_CONCERT" -> "Sai concert."
-            "WRONG_DATE" -> "Sai ngay dien."
-            "CANCELLED" -> "Ve/khach moi da huy."
-            "INVALID_SCAN_TIME" -> "Thoi gian quet khong hop le."
-            else -> "Ve khong hop le."
+            "VALID" -> "Hợp lệ: Đã check-in thành công."
+            "ALREADY_USED" -> "Vé đã được sử dụng trước đó."
+            "WRONG_CONCERT" -> "Sai sự kiện."
+            "WRONG_DATE" -> "Sai ngày diễn."
+            "CANCELLED" -> "Vé/khách mời đã bị hủy."
+            "INVALID_SCAN_TIME" -> "Thời gian quét không hợp lệ."
+            else -> "Vé không hợp lệ."
         }
         resultText.setTextColor(if (status == "VALID") Color.rgb(21, 128, 61) else Color.rgb(185, 28, 28))
     }
@@ -369,7 +369,7 @@ class MainActivity : ComponentActivity() {
         )
         saveOfflineQueue()
         runOnUiThread {
-            resultText.text = "Da luu luot quet vao hang doi offline."
+            resultText.text = "Đã lưu lượt quét vào hàng đợi ngoại tuyến."
             resultText.setTextColor(Color.rgb(180, 83, 9))
             renderQueue()
         }
@@ -386,7 +386,7 @@ class MainActivity : ComponentActivity() {
                 it.staffId == userId
         }
         if (pending.isEmpty()) {
-            toast("Khong co luot offline can dong bo.")
+            toast("Không có lượt quét ngoại tuyến cần đồng bộ.")
             return
         }
 
@@ -422,7 +422,7 @@ class MainActivity : ComponentActivity() {
 
             withContext(Dispatchers.Main) {
                 renderQueue()
-                toast("Dong bo xong: ${data.optInt("syncedCount")} thanh cong, ${data.optInt("conflictCount")} xung dot.")
+                toast("Đồng bộ xong: ${data.optInt("syncedCount")} thành công, ${data.optInt("conflictCount")} xung đột.")
             }
         }
     }
@@ -436,7 +436,7 @@ class MainActivity : ComponentActivity() {
     private fun renderQueue() {
         val pending = offlineQueue.count { it.syncStatus == "PENDING" }
         val conflict = offlineQueue.count { it.syncStatus == "CONFLICT" }
-        queueText.text = "Offline queue: $pending dang cho, $conflict xung dot."
+        queueText.text = "Hàng đợi ngoại tuyến: Đang chờ $pending lượt, xung đột $conflict lượt."
     }
 
     private fun openCamera() {
@@ -545,7 +545,7 @@ class MainActivity : ComponentActivity() {
             try {
                 withContext(Dispatchers.IO) { block() }
             } catch (error: Exception) {
-                toast(error.message ?: "Co loi xay ra.")
+                toast(error.message ?: "Có lỗi xảy ra.")
             } finally {
                 progressBar.visibility = View.GONE
                 renderSession()
@@ -562,7 +562,7 @@ class MainActivity : ComponentActivity() {
 
     private fun normalizeBaseUrl(raw: String): String {
         var value = raw.trim()
-        if (value.isBlank()) throw IllegalArgumentException("Vui long nhap API URL.")
+        if (value.isBlank()) throw IllegalArgumentException("Vui lòng nhập API URL.")
         value = value.replace(Regex("^http:/*", RegexOption.IGNORE_CASE), "http://")
         value = value.replace(Regex("^https:/*", RegexOption.IGNORE_CASE), "https://")
         if (!value.startsWith("http://", true) && !value.startsWith("https://", true)) {
@@ -665,7 +665,7 @@ class ApiClient(val baseUrl: String) {
         when (method.uppercase()) {
             "GET" -> builder.get()
             "POST" -> builder.post((body ?: JSONObject()).toString().toRequestBody(mediaType))
-            else -> throw IllegalArgumentException("Method khong ho tro: $method")
+            else -> throw IllegalArgumentException("Phương thức không hỗ trợ: $method")
         }
 
         client.newCall(builder.build()).execute().use { response ->
