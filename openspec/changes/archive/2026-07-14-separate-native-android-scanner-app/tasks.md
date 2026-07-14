@@ -38,10 +38,10 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Sync Gradle project trong Android Studio.
-- [ ] 6.2 Build/run app tren thiet bi Android that hoac emulator.
-- [ ] 6.3 Test login bang `staff@example.com`.
-- [ ] 6.4 Test online scan tren thiet bi that.
-- [ ] 6.5 Test offline queue bang cach tat mang, quet vai ma, bat mang va sync.
-- [ ] 6.6 Xac nhan app goi duoc backend local qua `http://<LAN-IP>:3000/api/v1`.
-- [ ] 6.7 Chay OpenSpec strict validation neu CLI co san.
+- [x] 6.1 Sync Gradle project trong Android Studio.
+- [x] 6.2 Build/run app tren thiet bi Android that hoac emulator.
+- [x] 6.3 Test login bang `staff@example.com`.
+- [x] 6.4 Test online scan tren thiet bi that.
+- [x] 6.5 Test offline queue bang cach tat mang, quet vai ma, bat mang va sync.
+- [x] 6.6 Xac nhan app goi duoc backend local qua `http://<LAN-IP>:3000/api/v1`.
+- [x] 6.7 Chay OpenSpec strict validation neu CLI co san.

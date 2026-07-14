@@ -134,10 +134,93 @@ Kiến trúc TicketBox được thiết kế với tư duy **Design for Failure 
 ## C4 Diagram
 
 ### Level 1 — System Context
-<!-- Sơ đồ: TicketBox + actors + hệ thống ngoài (VNPAY, MoMo, AI model, CSV nhãn hàng) -->
+
+Sơ đồ mô tả các tác nhân tương tác (Actors) và mối liên kết giữa hệ thống chính TicketBox với các hệ thống bên ngoài:
+
+```mermaid
+graph TB
+    subgraph Actors [Tác nhân người dùng]
+        Audience[Khán giả<br/>Audience]
+        Organizer[Ban tổ chức<br/>Organizer]
+        Staff[Nhân sự soát vé<br/>Check-in Staff]
+    end
+
+    System[Hệ thống TicketBox<br/>Ticket Booking & Check-in System]
+
+    subgraph External [Hệ thống tích hợp ngoài]
+        Payment[Cổng thanh toán trực tuyến<br/>VNPAY / MoMo Gateway]
+        Gemini[Google Gemini API<br/>AI Model]
+        MailServer[IMAP/SMTP Mail Server<br/>Hộp thư Nhãn hàng & Gửi vé]
+    end
+
+    Audience -->|Đăng ký, mua vé, thanh toán, xem vé QR| System
+    Organizer -->|Quản lý sự kiện, phân công soát vé, cấu hình nhãn hàng| System
+    Staff -->|Quét QR soát vé, đồng bộ ngoại tuyến| System
+
+    System -->|Tạo giao dịch thanh toán & nhận webhook callback| Payment
+    System -->|Gửi PDF profile, nhận bio tóm tắt nghệ sĩ| Gemini
+    System -->|Đọc hộp thư tải CSV danh sách VIP / Gửi mail e-ticket| MailServer
+```
+
+**Mô tả chi tiết các tác nhân & hệ thống:**
+- **Khán giả:** Đăng nhập, tìm kiếm sự kiện, đặt chỗ giữ vé, thanh toán qua cổng thanh toán, xem và nhận e-ticket QR trong hồ sơ hoặc email.
+- **Ban tổ chức:** Sử dụng bảng điều khiển quản trị (Admin Dashboard) để cấu hình concert, phân công cổng/nhân sự soát vé, và thiết lập cấu hình đồng bộ khách VIP.
+- **Nhân sự soát vé:** Sử dụng ứng dụng Android native chuyên biệt tại cổng để quét mã QR vé (online) hoặc ghi lại lượt quét tạm thời trong hàng đợi cục bộ (offline) rồi đồng bộ lại sau.
+- **VNPAY / MoMo:** Các cổng thanh toán trung gian xử lý trừ tiền và phát đi callback IPN (webhook) để cập nhật trạng thái đơn hàng.
+- **Google Gemini API:** AI model tiếp nhận nội dung text thô từ PDF hồ sơ nghệ sĩ để làm sạch và sinh ra tiểu sử nghệ sĩ ngắn gọn.
+- **Mail Server:** Hộp thư chung để nhận định kỳ file CSV danh sách khách VIP từ nhãn hàng tài trợ, đồng thời đảm nhận việc gửi email vé QR cho khán giả/khách VIP.
 
 ### Level 2 — Container
-<!-- Sơ đồ: web app, mobile app soát vé, backend API, database, message broker, ... -->
+
+Sơ đồ phân rã các khối container công nghệ, cơ sở dữ liệu và các thành phần xử lý ngầm (workers) cấu thành hệ thống:
+
+```mermaid
+graph TB
+    subgraph Clients [Ứng dụng Client]
+        CustomerApp[Web App Khán giả<br/>React / Next.js]
+        AdminApp[Admin Dashboard<br/>React]
+        ScannerApp[Scanner Mobile App<br/>Android Native Kotlin]
+    end
+
+    subgraph Backend [Hệ thống Backend]
+        API[Core Backend API<br/>Node.js / Express.js]
+        Worker[Background Job Worker<br/>BullMQ / Node.js]
+    end
+
+    subgraph Storage [Tầng Lưu trữ]
+        Postgres[(PostgreSQL Main DB)]
+        Redis[(Redis Cache & Queue)]
+        MinIO[(MinIO S3 Object Storage)]
+    end
+
+    subgraph External [Hệ thống tích hợp ngoài]
+        VNPAY[VNPAY Gateway]
+        MoMo[MoMo Gateway]
+        Gemini[Google Gemini API]
+        MailServer[IMAP/SMTP Mail Server]
+    end
+
+    %% Client Interactions
+    CustomerApp -->|HTTPS / REST API| API
+    AdminApp -->|HTTPS / REST API| API
+    ScannerApp -->|HTTPS / REST API| API
+
+    %% API Interactions
+    API -->|Read/Write Data| Postgres
+    API -->|Enqueue Jobs / Cache TTL| Redis
+    API -->|Upload PDF / Save CSV| MinIO
+
+    %% Worker Interactions
+    Worker -->|Process Queue Jobs| Redis
+    Worker -->|Fetch Objects| MinIO
+    Worker -->|Update Status / Save Tickets| Postgres
+
+    %% External Connections
+    API -->|Create Payment Link| VNPAY
+    API -->|Create Payment Link| MoMo
+    Worker -->|Generate Bio| Gemini
+    Worker -->|Download VIP CSV / Send Emails| MailServer
+```
 
 ---
 ## High-Level Architecture Diagram (Tích hợp & Ngoại tuyến)

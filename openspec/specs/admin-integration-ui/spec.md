@@ -1,7 +1,6 @@
 # Admin Integration UI Specification
 
 ## Purpose
-
 Quy định giao diện quản trị cho eventCode, AI Artist Bio, email nhãn hàng và báo cáo VIP Sync, bao gồm điều hướng, trạng thái dữ liệu, responsive và bảo vệ integration secrets.
 
 ## Requirements
@@ -24,6 +23,8 @@ Admin frontend SHALL yêu cầu ban tổ chức nhập `eventCode` khi tạo con
 - **THEN** UI SHALL giữ lại dữ liệu đang nhập
 - **AND** UI SHALL hiển thị thông điệp lỗi backend
 
+---
+
 ### Requirement: Điều hướng tích hợp trong dashboard hiện tại
 Admin frontend SHALL cung cấp các mục `AI Artist Bio`, `Email nhãn hàng` và `VIP Sync` trong hệ thống tab hiện có mà không làm thay đổi các chức năng quản trị khác.
 
@@ -36,6 +37,8 @@ Admin frontend SHALL cung cấp các mục `AI Artist Bio`, `Email nhãn hàng` 
 - **WHEN** tài khoản không có role `ORGANIZER` truy cập admin frontend
 - **THEN** UI SHALL hiển thị trạng thái từ chối truy cập
 - **AND** UI SHALL không tải dữ liệu AI Bio, sponsor email hoặc VIP report
+
+---
 
 ### Requirement: Giao diện tích hợp thống nhất với style hiện tại
 Các màn hình tích hợp SHALL tái sử dụng ngôn ngữ thiết kế và component hiện có của admin frontend, đồng thời hỗ trợ desktop và mobile mà không chồng lấn nội dung.
@@ -51,6 +54,8 @@ Các màn hình tích hợp SHALL tái sử dụng ngôn ngữ thiết kế và 
 - **AND** form SHALL chuyển về một cột
 - **AND** bảng rộng SHALL cuộn ngang trong vùng chứa
 
+---
+
 ### Requirement: Trạng thái dữ liệu nhất quán
 Mỗi khu vực tích hợp SHALL thể hiện rõ trạng thái loading, empty, success và error mà không làm mất dữ liệu form đang nhập khi request thất bại.
 
@@ -64,6 +69,8 @@ Mỗi khu vực tích hợp SHALL thể hiện rõ trạng thái loading, empty,
 - **THEN** UI SHALL dừng trạng thái loading liên quan
 - **AND** UI SHALL hiển thị thông điệp lỗi theo cơ chế alert hiện tại
 
+---
+
 ### Requirement: Không quản lý integration secret trên admin frontend
 Admin frontend SHALL không đọc, hiển thị hoặc cho phép chỉnh sửa Gemini API key, IMAP password, SMTP password, MinIO secret hoặc `QR_SECRET_KEY`.
 
@@ -71,3 +78,19 @@ Admin frontend SHALL không đọc, hiển thị hoặc cho phép chỉnh sửa 
 - **WHEN** organizer mở AI Artist Bio, Email nhãn hàng hoặc VIP Sync
 - **THEN** UI SHALL chỉ thao tác dữ liệu nghiệp vụ qua backend API
 - **AND** không integration secret nào SHALL xuất hiện trong response model, form hoặc local storage
+
+---
+
+### Requirement: Admin Integration Management UI
+Admin frontend SHALL provide organizer-facing management pages for integrations and operations, while operational scanning at the gate SHALL be handled by Android Scanner App.
+
+#### Scenario: Organizer manages check-in operation
+- **WHEN** organizer opens admin frontend
+- **THEN** admin frontend SHALL provide management/reporting views for check-in operation
+- **AND** admin frontend MAY provide staff assignment, scan history and APK installation guidance
+- **AND** admin frontend SHALL not be the primary camera scanning client for gate staff.
+
+#### Scenario: Staff opens admin frontend
+- **WHEN** user with role `CHECKIN_STAFF` opens admin frontend
+- **THEN** admin frontend SHALL guide the user to use Android Scanner App for gate scanning
+- **AND** admin frontend SHALL not expose organizer-only management actions.

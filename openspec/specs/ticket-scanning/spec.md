@@ -1,40 +1,82 @@
-﻿# Ticket Scanning
+# Ticket Scanning
 
 ## Purpose
-TBD
+Đặc tả chi tiết các yêu cầu liên quan đến quét mã QR vé (cả vé thường và vé VIP), xác thực trạng thái check-in trên thiết bị soát vé di động (Android Scanner App), quản lý ranh giới thiết bị (Scanner Client Boundary) và đồng bộ hóa hàng đợi offline.
+
 ## Requirements
-### Requirement: QuÃ©t vÃ  xÃ¡c thá»±c mÃ£ QR cá»§a vÃ©
-Há»‡ thá»‘ng SHALL cung cáº¥p má»™t API endpoint Ä‘á»ƒ xÃ¡c thá»±c mÃ£ QR token khi quÃ©t vÃ  cáº­p nháº­t tráº¡ng thÃ¡i check-in cá»§a vÃ©.
 
-#### Scenario: QuÃ©t vÃ© há»£p lá»‡
-- **WHEN** má»™t mÃ£ QR token há»£p lá»‡ vÃ  chÆ°a qua sá»­ dá»¥ng Ä‘Æ°á»£c gá»­i lÃªn Ä‘á»ƒ quÃ©t
-- **THEN** há»‡ thá»‘ng SHALL cáº­p nháº­t tráº¡ng thÃ¡i cá»§a vÃ© thÃ nh "Ä‘Ã£ check-in"
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» pháº£n há»“i thÃ nh cÃ´ng cÃ¹ng vá»›i thÃ´ng tin chi tiáº¿t cá»§a vÃ©
+### Requirement: Quét và xác thực mã QR của vé
+Hệ thống SHALL cung cấp API check-in bảo vệ bằng JWT/RBAC để Android Scanner App gửi QR token, xác thực vé và cập nhật trạng thái check-in bằng thao tác atomic để một vé chỉ có một lượt check-in thành công.
 
-#### Scenario: QuÃ©t vÃ© khÃ´ng há»£p lá»‡
-- **WHEN** má»™t mÃ£ QR token khÃ´ng há»£p lá»‡ hoáº·c bá»‹ lÃ m giáº£ Ä‘Æ°á»£c gá»­i lÃªn Ä‘á»ƒ quÃ©t
-- **THEN** há»‡ thá»‘ng SHALL tá»« chá»‘i yÃªu cáº§u
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» lá»—i "VÃ© khÃ´ng há»£p lá»‡"
+#### Scenario: Quét vé từ Android Scanner App hợp lệ
+- **WHEN** Android Scanner App gửi một QR token hợp lệ của vé chưa dùng kèm JWT role `CHECKIN_STAFF`
+- **AND** nhân viên được phân công đúng concert/gate
+- **THEN** backend SHALL cập nhật vé thành đã check-in
+- **AND** backend SHALL trả kết quả `VALID` cùng thông tin loại vé và khách hàng.
 
-#### Scenario: QuÃ©t vÃ© trÃ¹ng láº·p
-- **WHEN** má»™t mÃ£ QR token há»£p lá»‡ nhÆ°ng Ä‘Ã£ Ä‘Æ°á»£c check-in trÆ°á»›c Ä‘Ã³ Ä‘Æ°á»£c gá»­i lÃªn
-- **THEN** há»‡ thá»‘ng SHALL tá»« chá»‘i yÃªu cáº§u
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» lá»—i "VÃ© Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng"
+#### Scenario: Quét vé từ staff không được phân công
+- **WHEN** Android Scanner App gửi QR token cho concert/gate mà nhân viên không được phân công
+- **THEN** backend SHALL từ chối request với lỗi phân quyền
+- **AND** backend SHALL không cập nhật trạng thái vé.
 
-### Requirement: QuÃ©t E-Ticket cá»§a khÃ¡ch má»i VIP
-Há»‡ thá»‘ng SHALL cho phÃ©p nhÃ¢n sá»± soÃ¡t vÃ© xÃ¡c thá»±c QR e-ticket cá»§a khÃ¡ch má»i VIP táº¡i cá»•ng VIP báº±ng cÃ¹ng cÆ¡ cháº¿ an toÃ n nhÆ° e-ticket mua thÆ°á»ng.
+#### Scenario: Hai request quét cùng một vé đồng thời
+- **WHEN** hai request hợp lệ cùng quét một QR chưa dùng
+- **THEN** chỉ một request SHALL trả `VALID`
+- **AND** request còn lại SHALL trả `ALREADY_USED`
+- **AND** chỉ một check-in log thành công được ghi nhận.
 
-#### Scenario: QuÃ©t e-ticket VIP há»£p lá»‡
-- **WHEN** nhÃ¢n sá»± soÃ¡t vÃ© gá»­i QR token há»£p lá»‡ cá»§a má»™t khÃ¡ch má»i VIP chÆ°a check-in
-- **THEN** há»‡ thá»‘ng SHALL cáº­p nháº­t tráº¡ng thÃ¡i khÃ¡ch má»i VIP thÃ nh Ä‘Ã£ check-in
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» thÃ´ng tin khÃ¡ch má»i, cÃ´ng ty, concert vÃ  loáº¡i vÃ© VIP guest
+#### Scenario: Quét vé không hợp lệ
+- **WHEN** một mã QR token không hợp lệ hoặc bị làm giả được gửi lên để quét
+- **THEN** hệ thống SHALL từ chối yêu cầu
+- **AND** hệ thống SHALL trả về lỗi "Vé không hợp lệ"
 
-#### Scenario: QuÃ©t e-ticket VIP Ä‘Ã£ sá»­ dá»¥ng
-- **WHEN** nhÃ¢n sá»± soÃ¡t vÃ© gá»­i QR token cá»§a má»™t khÃ¡ch má»i VIP Ä‘Ã£ check-in trÆ°á»›c Ä‘Ã³
-- **THEN** há»‡ thá»‘ng SHALL tá»« chá»‘i yÃªu cáº§u
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» lá»—i cho biáº¿t e-ticket VIP Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng
+#### Scenario: Quét vé trùng lặp
+- **WHEN** một mã QR token hợp lệ nhưng đã được check-in trước đó được gửi lên
+- **THEN** hệ thống SHALL từ chối yêu cầu
+- **AND** hệ thống SHALL trả về lỗi "Vé đã được sử dụng"
 
-#### Scenario: QuÃ©t e-ticket VIP khÃ´ng há»£p lá»‡
-- **WHEN** nhÃ¢n sá»± soÃ¡t vÃ© gá»­i QR token khÃ´ng tá»“n táº¡i hoáº·c khÃ´ng khá»›p chá»¯ kÃ½ há»‡ thá»‘ng
-- **THEN** há»‡ thá»‘ng SHALL tá»« chá»‘i yÃªu cáº§u
-- **AND** há»‡ thá»‘ng SHALL tráº£ vá» lá»—i cho biáº¿t e-ticket VIP khÃ´ng há»£p lá»‡
+#### Scenario: Đồng bộ lượt quét offline
+- **WHEN** Android Scanner App gửi danh sách lượt quét offline theo thứ tự thời gian
+- **THEN** backend SHALL xử lý từng lượt theo quy tắc First-Scan Wins
+- **AND** backend SHALL trả danh sách conflict cho các lượt không thể đồng bộ thành công.
+
+---
+
+### Requirement: Quét E-Ticket của khách mời VIP
+Hệ thống SHALL cho phép nhân sự soát vé xác thực QR e-ticket của khách mời VIP cả trong luồng online scan và offline sync tại cổng VIP bằng cùng cơ chế an toàn như e-ticket mua thường.
+
+#### Scenario: Quét e-ticket VIP hợp lệ
+- **WHEN** nhân sự soát vé gửi QR token hợp lệ của một khách mời VIP chưa check-in
+- **THEN** hệ thống SHALL cập nhật trạng thái khách mời VIP thành đã check-in
+- **AND** hệ thống SHALL trả về thông tin khách mời, công ty, concert và loại vé VIP guest.
+
+#### Scenario: Quét e-ticket VIP đã sử dụng
+- **WHEN** nhân sự soát vé gửi QR token của một khách mời VIP đã check-in trước đó
+- **THEN** hệ thống SHALL từ chối yêu cầu
+- **AND** hệ thống SHALL trả về lỗi cho biết e-ticket VIP đã được sử dụng.
+
+#### Scenario: Quét e-ticket VIP không hợp lệ
+- **WHEN** nhân sự soát vé gửi QR token không tồn tại hoặc không khớp chữ ký hệ thống
+- **THEN** hệ thống SHALL từ chối yêu cầu
+- **AND** hệ thống SHALL trả về lỗi cho biết e-ticket VIP không hợp lệ.
+
+#### Scenario: Đồng bộ offline QR VIP hợp lệ
+- **WHEN** Scanner App đồng bộ một QR token VIP hợp lệ đã quét offline
+- **THEN** backend SHALL cập nhật khách mời VIP thành đã check-in
+- **AND** sync response SHALL tăng `syncedCount`
+- **AND** backend SHALL NOT trả conflict `INVALID_TICKET` cho QR VIP hợp lệ.
+
+#### Scenario: Đồng bộ offline QR VIP đã dùng
+- **WHEN** Scanner App đồng bộ một QR token VIP đã check-in trước đó
+- **THEN** backend SHALL trả conflict cho lượt quét đó
+- **AND** conflict reason SHALL cho biết vé/khách mời đã được sử dụng.
+
+---
+
+### Requirement: Scanner Client Boundary
+Hệ thống SHALL coi Android Scanner App là client chính cho thao tác quét tại cổng, còn admin web là client quản lý và giám sát.
+
+#### Scenario: Nhân viên cần quét tại cổng
+- **WHEN** nhân viên soát vé bắt đầu ca làm
+- **THEN** nhân viên SHALL dùng Android Scanner App trên điện thoại để quét QR
+- **AND** admin web SHALL không là luồng vận hành chính cho camera scanning tại cổng.

@@ -1,7 +1,8 @@
 # hold-order-protection Specification
 
 ## Purpose
-TBD - created by archiving change 2026-06-18-hold-order-protection. Update Purpose after archive.
+Đặc tả cơ chế bảo vệ hệ thống đặt vé (Hold Order Protection) bao gồm giới hạn tần suất (Rate Limiting), phòng chờ (Waiting Room), và tính nhất quán chống trùng lặp (Idempotency) sử dụng Redis.
+
 ## Requirements
 ### Requirement: Rate Limit Hold Order API
 The system SHALL limit `POST /api/v1/orders/hold` before idempotency lookup and before opening the PostgreSQL transaction.
@@ -105,6 +106,8 @@ The system SHALL allow hold order request when the user has a valid checkout tok
 - **WHEN** the user calls `POST /api/v1/orders/hold`
 - **THEN** the system SHALL continue to the existing hold order flow.
 
+---
+
 ### Requirement: Keep Waiting Room Out Of RabbitMQ
 The system SHALL NOT use RabbitMQ for waiting room queueing or checkout-token release.
 
@@ -113,3 +116,36 @@ The system SHALL NOT use RabbitMQ for waiting room queueing or checkout-token re
 - **WHEN** the system releases users
 - **THEN** it SHALL read and update Redis waiting-room keys directly.
 
+---
+
+### Requirement: Stable Hold Idempotency Key
+Customer frontend SHALL reuse one idempotency key for repeated submissions of the same hold-order attempt.
+
+#### Scenario: User double-clicks hold order button
+- **WHEN** the user submits the same hold-order form twice before the first response completes
+- **THEN** both requests SHALL carry the same `Idempotency-Key`
+- **AND** backend idempotency SHALL treat them as the same operation.
+
+#### Scenario: User changes selected ticket type or quantity
+- **WHEN** the user changes ticket type or quantity
+- **THEN** customer frontend SHALL reset the hold-order idempotency key
+- **AND** the next submit SHALL represent a new checkout attempt.
+
+---
+
+### Requirement: Atomic Redis Idempotency Lock
+Hệ thống SHALL dùng Redis atomic lock cho idempotency key để tránh nhiều request cùng key cùng được xử lý.
+
+#### Scenario: Hai request cùng Idempotency-Key đến đồng thời
+- **WHEN** request đầu tiên đặt được lock idempotency
+- **THEN** request thứ hai SHALL nhận `409 IDEMPOTENCY_CONFLICT`
+- **AND** chỉ một request được thực thi nghiệp vụ chính.
+
+---
+
+### Requirement: Redis Queue Configuration Uses Full REDIS_URL
+BullMQ SHALL đọc đầy đủ cấu hình Redis từ `REDIS_URL`, bao gồm host, port, username, password, database và TLS khi có.
+
+#### Scenario: Redis URL có password
+- **WHEN** `REDIS_URL` chứa thông tin xác thực
+- **THEN** BullMQ queues và workers SHALL kết nối bằng đúng credential đó.
