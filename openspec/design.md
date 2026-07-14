@@ -408,6 +408,81 @@ sequenceDiagram
     App-->>Staff: Hiển thị báo cáo kết quả đồng bộ
 ```
 
+### D. Sơ đồ trạng thái của log soát vé ngoại tuyến (Offline Log State Diagram - BP07)
+
+Để quản lý trạng thái của từng lượt quét lưu tạm thời trên bộ nhớ cục bộ của Scanner App, hệ thống định nghĩa các trạng thái và điều kiện chuyển dịch như sau:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : Quét offline thành công (Lưu SharedPreferences)
+    PENDING --> SYNCING : Ấn nút "Đồng bộ lượt ngoại tuyến"
+    SYNCING --> SYNCED : Server phản hồi VALID (Hợp lệ)
+    SYNCING --> CONFLICT : Server phản hồi lỗi ALREADY_USED / WRONG_CONCERT / CANCELLED
+    CONFLICT --> [*] : Bấm nút "Dọn lượt đã đồng bộ"
+    SYNCED --> [*] : Bấm nút "Dọn lượt đã đồng bộ"
+```
+
+#### Quy tắc xử lý xung đột (Conflict Handling):
+- **Nguyên tắc phân định:** Khi gom lô logs offline gửi lên, server sắp xếp các logs theo `scannedAtLocal` tăng dần (tức là theo trình tự thời gian thực tế quét tại cổng). Lượt quét có dấu thời gian sớm hơn sẽ được xử lý trước và ghi nhận thành công (`VALID`). Lượt quét muộn hơn của cùng một mã vé sẽ bị đánh trạng thái lỗi xung đột (`ALREADY_USED`) và trả về cho client kèm thông tin chi tiết của khách hàng để đối chiếu.
+
+---
+
+### E. Quy trình nhập danh sách khách VIP từ file CSV đính kèm email (VIP Guest Sync Flow - BP08)
+
+#### 1. Sơ đồ luồng dữ liệu & xử lý lỗi (Data Flow & Validation Diagram)
+
+```mermaid
+graph TD
+    Start([Bắt đầu Cron Job]) --> PollMail[Quét Mailbox IMAP tìm email chưa đọc]
+    PollMail --> HasEmail{Có email hợp lệ?}
+    
+    HasEmail -- Không --> CreateNoFile[Tạo báo cáo import: NO_FILE] --> End([Kết thúc])
+    
+    HasEmail -- Có --> CheckSender{Sender thuộc whitelist & Active?}
+    CheckSender -- Không --> RejectMail[Tạo báo cáo: FAILED <br/> Bỏ qua email] --> End
+    
+    CheckSender -- Có --> SaveCSV[Lưu file CSV gốc vào MinIO]
+    SaveCSV --> CreatePendingJob[Tạo Job: PENDING]
+    CreatePendingJob --> ParseCSV[Đọc & Parse file CSV]
+    
+    ParseCSV --> CheckHeader{Đầy đủ headers bắt buộc?}
+    CheckHeader -- Không --> FailJob[Tập tin lỗi - Trạng thái: FAILED] --> End
+    
+    CheckHeader -- Có --> LoopRows[Lặp qua từng dòng trong CSV]
+    
+    LoopRows --> ValidateRow{fullName, eventCode có sẵn? <br/> Có email hoặc phone? <br/> Email đúng định dạng?}
+    ValidateRow -- Lỗi --> RegisterRowError[Ghi nhận lỗi dòng vào RowErrors] --> NextRow{Còn dòng tiếp theo?}
+    
+    ValidateRow -- Hợp lệ --> CheckConcert{eventCode hợp lệ & <br/> thuộc quyền sở hữu?}
+    CheckConcert -- Không --> RegisterRowError
+    
+    CheckConcert -- Có --> CheckDuplicate{concertId + email/phone <br/> đã tồn tại?}
+    CheckDuplicate -- Có trùng --> RegisterDuplicate[Bỏ qua dòng - Tăng duplicateRows] --> NextRow
+    
+    CheckDuplicate -- Không trùng --> CreateGuest[Tạo bản ghi VipGuest & sinh QR token]
+    CreateGuest --> SendMailQueue[Đẩy job gửi email e-ticket vào hàng đợi]
+    SendMailQueue --> NextRow
+    
+    NextRow -- Có --> LoopRows
+    NextRow -- Không --> UpdateJobStatus{successRows > 0?}
+    
+    UpdateJobStatus -- Không --> SetFailed[Trạng thái: FAILED] --> End
+    UpdateJobStatus -- Có --> CheckRowErrors{Có lỗi hoặc trùng?}
+    CheckRowErrors -- Có --> SetPartialSuccess[Trạng thái: PARTIAL_SUCCESS] --> End
+    CheckRowErrors -- Không --> SetSuccess[Trạng thái: SUCCESS] --> End
+```
+
+#### 2. Quy tắc xác thực định dạng CSV & Nhập không trùng lặp (Validation & Idempotent Import)
+*   **Cấu trúc tệp CSV bắt buộc:** Header của file bắt buộc phải chứa đủ các cột: `fullName,email,phone,company,eventCode,note`. File thiếu bất cứ cột nào trong allowlist header sẽ bị hủy bỏ toàn bộ và báo cáo `FAILED`.
+*   **Quy định xác thực từng dòng (Row-level Validation):**
+    *   Phải có thông tin `fullName`.
+    *   Phải có ít nhất `email` hoặc `phone` để liên hệ/định danh. Nếu có nhập email, email phải vượt qua bộ lọc regex kiểm tra tính hợp lệ.
+    *   Mã sự kiện `eventCode` phải tồn tại trong cơ sở dữ liệu và thuộc quyền sở hữu của Ban tổ chức (Organizer) sở hữu allowlist.
+    *   Dòng vi phạm bất kỳ điều kiện nào ở trên sẽ được ghi nhận chi tiết lỗi vào danh sách `rowErrors` để phục vụ ban tổ chức đối soát sau, đồng thời tiến trình vẫn tiếp tục xử lý dòng tiếp theo (không dừng hay rollback cả file).
+*   **Cơ chế nhập không trùng lặp (Idempotency):**
+    *   Mỗi khách VIP trong concert được định danh duy nhất bằng cặp khóa `concertId + email` (hoặc `concertId + phone` nếu không có email).
+    *   Khi phát hiện trùng lắp với dữ liệu đã tồn tại trong DB, hệ thống lập tức bỏ qua (skip) dòng đó, tăng bộ đếm `duplicateRows` và không tạo vé điện tử hay gửi email mới. Điều này đảm bảo việc gửi lại cùng một file CSV nhiều lần (hoặc file có bản ghi lặp) không gây trùng lặp dữ liệu hay làm phiền khách mời.
+
 ---
 
 ## Thiết kế Cơ sở dữ liệu 
