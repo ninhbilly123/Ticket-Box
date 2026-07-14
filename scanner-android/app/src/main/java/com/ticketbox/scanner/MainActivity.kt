@@ -487,8 +487,11 @@ class MainActivity : ComponentActivity() {
                 val raw = barcodes.firstOrNull()?.rawValue
                 if (!raw.isNullOrBlank() && !scanLocked) {
                     scanLocked = true
-                    runOnUiThread { submitScan(raw) }
-                    previewView.postDelayed({ scanLocked = false }, 1600)
+                    runOnUiThread {
+                        stopCamera()
+                        submitScan(raw)
+                        scanLocked = false
+                    }
                 }
             }
             .addOnCompleteListener { imageProxy.close() }
