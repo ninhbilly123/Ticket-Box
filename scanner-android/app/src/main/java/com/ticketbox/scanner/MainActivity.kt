@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
@@ -112,25 +114,60 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildUi() {
-        val scroll = ScrollView(this)
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.rgb(241, 245, 249)) // Slate 100 background
+        }
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(24))
-            setBackgroundColor(Color.WHITE)
+            setPadding(dp(20), dp(24), dp(20), dp(32))
+            setBackgroundColor(Color.rgb(241, 245, 249))
         }
         scroll.addView(root)
         setContentView(scroll)
 
-        root.addView(text("TicketBox Scanner", 24, true))
-        root.addView(text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted())
+        val titleView = text("TicketBox Scanner", 26, true).apply {
+            setTextColor(Color.rgb(15, 23, 42)) // Slate 900
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(16), 0, dp(4))
+            }
+        }
+        root.addView(titleView)
+        
+        val subtitleView = text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted().apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, dp(16))
+            }
+        }
+        root.addView(subtitleView)
 
         progressBar = ProgressBar(this).apply {
             visibility = View.GONE
             isIndeterminate = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(8), 0, dp(8))
+            }
         }
         root.addView(progressBar)
 
-        statusText = text("", 14, false)
+        statusText = text("", 13, false).apply {
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(4), 0, dp(16))
+            }
+        }
         root.addView(statusText)
 
         loginPanel = verticalPanel()
@@ -149,14 +186,38 @@ class MainActivity : ComponentActivity() {
         scannerPanel = verticalPanel()
         scannerPanel.addView(button("Đăng xuất") { logout() })
         scannerPanel.addView(label("Sự kiện được phân công"))
-        concertSpinner = Spinner(this)
-        scannerPanel.addView(concertSpinner, matchWrap())
+        
+        val spinnerBg = {
+            GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.rgb(248, 250, 252))
+                setStroke(dp(1), Color.rgb(226, 232, 240))
+            }
+        }
+
+        concertSpinner = Spinner(this).apply {
+            background = spinnerBg()
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        scannerPanel.addView(concertSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, dp(4), 0, dp(12))
+        })
+
         scannerPanel.addView(label("Cổng soát vé"))
-        gateSpinner = Spinner(this)
-        scannerPanel.addView(gateSpinner, matchWrap())
+        gateSpinner = Spinner(this).apply {
+            background = spinnerBg()
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        scannerPanel.addView(gateSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, dp(4), 0, dp(12))
+        })
+
         scannerPanel.addView(button("Tải lại phân công") { loadAssignedConcerts() })
 
-        resultText = text("", 16, true)
+        resultText = text("", 15, true).apply {
+            visibility = View.GONE
+        }
         scannerPanel.addView(resultText)
 
         manualCodeInput = input("Dán QR token hoặc mã vé", "")
@@ -166,15 +227,50 @@ class MainActivity : ComponentActivity() {
         scannerPanel.addView(button("Mở camera quét QR") { openCamera() })
         scannerPanel.addView(button("Đóng camera") { stopCamera() })
 
-        cameraContainer = verticalPanel().apply { visibility = View.GONE }
+        cameraContainer = verticalPanel().apply { 
+            visibility = View.GONE 
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
         previewView = PreviewView(this)
-        cameraContainer.addView(previewView, ViewGroup.LayoutParams(matchParent(), dp(360)))
+        cameraContainer.addView(previewView, ViewGroup.LayoutParams(matchParent(), dp(320)))
         scannerPanel.addView(cameraContainer)
 
-        queueText = text("", 14, false)
+        queueText = text("", 13, false).apply {
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            val badgeBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.rgb(241, 245, 249))
+            }
+            background = badgeBg
+            setTextColor(Color.rgb(71, 85, 105))
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(12), 0, dp(12))
+            }
+        }
         scannerPanel.addView(queueText)
-        conflictListText = text("", 12, false).apply {
+
+        conflictListText = text("", 13, false).apply {
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            val conflictBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.rgb(254, 242, 242))
+                setStroke(dp(1), Color.rgb(254, 202, 202))
+            }
+            background = conflictBg
             setTextColor(Color.rgb(185, 28, 28))
+            gravity = Gravity.LEFT
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(8), 0, dp(12))
+            }
             visibility = View.GONE
         }
         scannerPanel.addView(conflictListText)
@@ -192,6 +288,21 @@ class MainActivity : ComponentActivity() {
         } else {
             "Chưa đăng nhập. Hãy nhập API URL bằng IP LAN của laptop."
         }
+        
+        val isOnline = isOnline()
+        val (bgCol, txtCol) = if (isOnline) {
+            Pair(Color.rgb(220, 252, 231), Color.rgb(21, 128, 61)) // Green 100, Green 700
+        } else {
+            Pair(Color.rgb(254, 243, 199), Color.rgb(180, 83, 9)) // Yellow 100, Yellow 700
+        }
+        val statusBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(bgCol)
+        }
+        statusText.background = statusBg
+        statusText.setTextColor(txtCol)
+        
         renderQueue()
     }
 
@@ -360,8 +471,34 @@ class MainActivity : ComponentActivity() {
             val vipStr = if (!company.isNullOrBlank() && company != "null") " (VIP - $company)" else ""
             resultMsg += "\nKhách: $name (${if (email.isNullOrBlank() || email == "null") "N/A" else email})$vipStr"
         }
-        resultText.text = resultMsg
-        resultText.setTextColor(if (status == "VALID") Color.rgb(21, 128, 61) else Color.rgb(185, 28, 28))
+
+        val (bgCol, strokeCol, txtCol) = if (status == "VALID") {
+            Triple(Color.rgb(240, 253, 250), Color.rgb(187, 247, 208), Color.rgb(21, 128, 61)) // Light green, light border, dark green text
+        } else {
+            Triple(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202), Color.rgb(185, 28, 28)) // Light red, light border, dark red text
+        }
+
+        val resultBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(10).toFloat()
+            setColor(bgCol)
+            setStroke(dp(1), strokeCol)
+        }
+
+        resultText.apply {
+            text = resultMsg
+            setTextColor(txtCol)
+            background = resultBg
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.VISIBLE
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(12), 0, dp(16))
+            }
+        }
     }
 
     private fun enqueueOffline(ticketId: String, reason: String) {
@@ -635,25 +772,53 @@ class MainActivity : ComponentActivity() {
             text = value
             textSize = size.toFloat()
             setTextColor(Color.rgb(15, 23, 42))
-            if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(0, dp(6), 0, dp(6))
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(4), 0, dp(4))
         }
     }
 
     private fun TextView.muted(): TextView {
-        setTextColor(Color.rgb(71, 85, 105))
+        setTextColor(Color.rgb(100, 116, 139)) // Slate 500
         return this
     }
 
-    private fun label(value: String): TextView = text(value, 13, true)
+    private fun label(value: String): TextView {
+        return text(value, 13, true).apply {
+            setTextColor(Color.rgb(71, 85, 105)) // Slate 600
+            setPadding(0, dp(10), 0, dp(4))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(8), 0, 0)
+            }
+        }
+    }
 
     private fun input(hintValue: String, defaultValue: String): EditText {
         return EditText(this).apply {
             hint = hintValue
             setText(defaultValue)
-            textSize = 15f
+            textSize = 14f
             setSingleLine(true)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(Color.rgb(15, 23, 42))
+            setHintTextColor(Color.rgb(148, 163, 184))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            
+            val inputBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.rgb(248, 250, 252))
+                setStroke(dp(1), Color.rgb(226, 232, 240))
+            }
+            background = inputBg
+            
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(4), 0, dp(10))
+            }
         }
     }
 
@@ -661,7 +826,34 @@ class MainActivity : ComponentActivity() {
         return Button(this).apply {
             text = label
             setAllCaps(false)
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            
+            val (bgColor, textColor) = when (label) {
+                "Đăng xuất", "Đóng camera" -> Pair(Color.rgb(239, 68, 68), Color.WHITE) // Red 500
+                "Dọn lượt đã đồng bộ", "Tải lại phân công" -> Pair(Color.rgb(226, 232, 240), Color.rgb(71, 85, 105)) // Slate 200, Slate 600
+                else -> Pair(Color.rgb(79, 70, 229), Color.WHITE) // Indigo 600
+            }
+            
+            setTextColor(textColor)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            
+            val btnBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(bgColor)
+            }
+            background = btnBg
+            
+            elevation = dp(2).toFloat()
             setOnClickListener { action() }
+            
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(6), 0, dp(10))
+            }
         }
     }
 
@@ -669,7 +861,22 @@ class MainActivity : ComponentActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(10), 0, dp(10))
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            
+            val cardBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(16).toFloat()
+                setColor(Color.WHITE)
+                setStroke(dp(1), Color.rgb(226, 232, 240))
+            }
+            background = cardBg
+            
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(12), 0, dp(12))
+            }
         }
     }
 
