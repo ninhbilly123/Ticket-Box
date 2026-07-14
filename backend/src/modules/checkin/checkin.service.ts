@@ -68,6 +68,7 @@ export class CheckinService {
         ],
       },
       include: {
+        user: true,
         orderItem: {
           include: {
             ticketType: true,
@@ -85,10 +86,17 @@ export class CheckinService {
       });
     }
 
+    const customer = {
+      name: ticket.user.fullName,
+      email: ticket.user.email,
+      phone: ticket.user.phone || null,
+      isVip: false,
+    };
+
     // 2. Kiểm tra vé có thuộc đúng concert đang soát không
     const ticketConcertId = ticket.orderItem.ticketType.concertId;
     if (ticketConcertId !== concertId) {
-      return { status: 'WRONG_CONCERT' };
+      return { status: 'WRONG_CONCERT', customer };
     }
 
     // 3. Kiểm tra ngày diễn ra concert (WRONG_DATE)
@@ -97,18 +105,18 @@ export class CheckinService {
     });
 
     if (!concert) {
-      return { status: 'WRONG_CONCERT' };
+      return { status: 'WRONG_CONCERT', customer };
     }
 
     const scannedAt = new Date(scannedAtLocal);
     if (Number.isNaN(scannedAt.getTime())) {
-      return { status: 'INVALID_SCAN_TIME' };
+      return { status: 'INVALID_SCAN_TIME', customer };
     }
 
     const scanDate = scannedAt.toDateString();
     const concertDate = new Date(concert.startAt).toDateString();
     if (scanDate !== concertDate) {
-      return { status: 'WRONG_DATE' };
+      return { status: 'WRONG_DATE', customer };
     }
 
     // 4. Kiểm tra vé đã được check-in trước đó chưa
@@ -124,6 +132,7 @@ export class CheckinService {
         status: 'ALREADY_USED',
         checkedInAt: existingCheckin.scannedAtLocal,
         deviceId: existingCheckin.deviceId,
+        customer,
       };
     }
 
@@ -161,6 +170,7 @@ export class CheckinService {
           ticketType: ticket.orderItem.ticketType.name,
           usedAt: checkinLog.scannedAtLocal,
         },
+        customer,
       };
     });
 
@@ -178,11 +188,15 @@ export class CheckinService {
         status: 'ALREADY_USED',
         checkedInAt: latestCheckin.scannedAtLocal,
         deviceId: latestCheckin.deviceId,
+        customer,
       };
     }
 
     const latestTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
-    return { status: latestTicket?.status === 'cancelled' ? 'CANCELLED' : 'INVALID_TICKET' };
+    return {
+      status: latestTicket?.status === 'cancelled' ? 'CANCELLED' : 'INVALID_TICKET',
+      customer,
+    };
   }
 
   private async scanImportedVipGuest(params: {
@@ -200,25 +214,35 @@ export class CheckinService {
     if (!guest || !guest.qrToken || !verifyVipGuestQrToken(guest.id, guest.qrToken)) {
       return { status: 'INVALID_TICKET' };
     }
+
+    const customer = {
+      name: guest.fullName,
+      email: guest.email || null,
+      phone: guest.phone || null,
+      company: guest.company || null,
+      isVip: true,
+    };
+
     if (guest.concertId !== concertId) {
-      return { status: 'WRONG_CONCERT' };
+      return { status: 'WRONG_CONCERT', customer };
     }
 
     const scannedAt = new Date(scannedAtLocal);
     if (Number.isNaN(scannedAt.getTime())) {
-      return { status: 'INVALID_SCAN_TIME' };
+      return { status: 'INVALID_SCAN_TIME', customer };
     }
     if (scannedAt.toDateString() !== guest.concert.startAt.toDateString()) {
-      return { status: 'WRONG_DATE' };
+      return { status: 'WRONG_DATE', customer };
     }
     if (guest.ticketStatus === 'CANCELLED') {
-      return { status: 'CANCELLED' };
+      return { status: 'CANCELLED', customer };
     }
     if (guest.ticketStatus === 'USED') {
       return {
         status: 'ALREADY_USED',
         checkedInAt: guest.checkedInAt,
         deviceId: null,
+        customer,
       };
     }
 
@@ -232,6 +256,7 @@ export class CheckinService {
         status: latest?.ticketStatus === 'CANCELLED' ? 'CANCELLED' : 'ALREADY_USED',
         checkedInAt: latest?.checkedInAt || null,
         deviceId: null,
+        customer,
       };
     }
 
@@ -245,6 +270,7 @@ export class CheckinService {
         deviceId,
         guestType: 'VIP_GUEST',
       },
+      customer,
     };
   }
 
@@ -269,7 +295,7 @@ export class CheckinService {
 
     let syncedCount = 0;
     let conflictCount = 0;
-    const conflicts: Array<{ ticketId: string; scannedAtLocal: string; reason: string }> = [];
+    const conflicts: Array<{ ticketId: string; scannedAtLocal: string; reason: string; customer?: any }> = [];
 
     for (const log of sortedLogs) {
       try {
@@ -288,6 +314,7 @@ export class CheckinService {
             ticketId: log.ticketId,
             scannedAtLocal: log.scannedAtLocal,
             reason: result.status,
+            customer: (result as any).customer || null,
           });
           conflictCount++;
         }

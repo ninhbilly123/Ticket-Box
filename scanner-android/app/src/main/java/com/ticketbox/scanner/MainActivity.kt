@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var concertSpinner: Spinner
     private lateinit var gateSpinner: Spinner
     private lateinit var queueText: TextView
+    private lateinit var conflictListText: TextView
     private lateinit var resultText: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var cameraContainer: LinearLayout
@@ -172,6 +173,11 @@ class MainActivity : ComponentActivity() {
 
         queueText = text("", 14, false)
         scannerPanel.addView(queueText)
+        conflictListText = text("", 12, false).apply {
+            setTextColor(Color.rgb(185, 28, 28))
+            visibility = View.GONE
+        }
+        scannerPanel.addView(conflictListText)
         scannerPanel.addView(button("Đồng bộ lượt ngoại tuyến") { syncOfflineQueue() })
         scannerPanel.addView(button("Dọn lượt đã đồng bộ") { clearResolvedQueue() })
         root.addView(scannerPanel)
@@ -337,7 +343,7 @@ class MainActivity : ComponentActivity() {
 
     private fun renderScanResult(data: JSONObject) {
         val status = data.optString("status", "INVALID_TICKET")
-        resultText.text = when (status) {
+        var resultMsg = when (status) {
             "VALID" -> "Hợp lệ: Đã check-in thành công."
             "ALREADY_USED" -> "Vé đã được sử dụng trước đó."
             "WRONG_CONCERT" -> "Sai sự kiện."
@@ -346,6 +352,15 @@ class MainActivity : ComponentActivity() {
             "INVALID_SCAN_TIME" -> "Thời gian quét không hợp lệ."
             else -> "Vé không hợp lệ."
         }
+        val customer = data.optJSONObject("customer")
+        if (customer != null) {
+            val name = customer.optString("name")
+            val email = customer.optString("email")
+            val company = customer.optString("company")
+            val vipStr = if (!company.isNullOrBlank() && company != "null") " (VIP - $company)" else ""
+            resultMsg += "\nKhách: $name (${if (email.isNullOrBlank() || email == "null") "N/A" else email})$vipStr"
+        }
+        resultText.text = resultMsg
         resultText.setTextColor(if (status == "VALID") Color.rgb(21, 128, 61) else Color.rgb(185, 28, 28))
     }
 
@@ -401,21 +416,32 @@ class MainActivity : ComponentActivity() {
                 .put("deviceId", deviceId)
                 .put("logs", logs)
             val data = apiClient.request("/checkins/sync", "POST", body, token) as JSONObject
-            val conflicts = mutableMapOf<String, String>()
+            val conflicts = mutableMapOf<String, JSONObject>()
             val conflictArray = data.optJSONArray("conflicts") ?: JSONArray()
             for (index in 0 until conflictArray.length()) {
                 val item = conflictArray.getJSONObject(index)
-                conflicts["${item.getString("ticketId")}|${item.getString("scannedAtLocal")}"] =
-                    item.optString("reason", "Conflict")
+                conflicts["${item.getString("ticketId")}|${item.getString("scannedAtLocal")}"] = item
             }
 
             offlineQueue = offlineQueue.map { item ->
                 if (pending.none { it.localId == item.localId }) {
                     item
                 } else {
-                    val reason = conflicts["${item.ticketId}|${item.scannedAtLocal}"]
-                    if (reason == null) item.copy(syncStatus = "SYNCED", lastError = null)
-                    else item.copy(syncStatus = "CONFLICT", lastError = reason)
+                    val conflictItem = conflicts["${item.ticketId}|${item.scannedAtLocal}"]
+                    if (conflictItem == null) {
+                        item.copy(syncStatus = "SYNCED", lastError = null)
+                    } else {
+                        val reason = conflictItem.optString("reason", "Conflict")
+                        val cust = conflictItem.optJSONObject("customer")
+                        item.copy(
+                            syncStatus = "CONFLICT",
+                            lastError = reason,
+                            customerName = cust?.optString("name"),
+                            customerEmail = cust?.optString("email"),
+                            customerPhone = cust?.optString("phone"),
+                            customerCompany = cust?.optString("company")
+                        )
+                    }
                 }
             }.toMutableList()
             saveOfflineQueue()
@@ -437,6 +463,25 @@ class MainActivity : ComponentActivity() {
         val pending = offlineQueue.count { it.syncStatus == "PENDING" }
         val conflict = offlineQueue.count { it.syncStatus == "CONFLICT" }
         queueText.text = "Hàng đợi ngoại tuyến: Đang chờ $pending lượt, xung đột $conflict lượt."
+
+        val conflicts = offlineQueue.filter { it.syncStatus == "CONFLICT" }
+        if (conflicts.isEmpty()) {
+            conflictListText.visibility = View.GONE
+            conflictListText.text = ""
+        } else {
+            conflictListText.visibility = View.VISIBLE
+            val sb = java.lang.StringBuilder("Chi tiết vé xung đột:\n")
+            conflicts.forEachIndexed { idx, item ->
+                sb.append("${idx + 1}. Vé: ${item.ticketId}\n")
+                if (item.customerName != null) {
+                    val company = item.customerCompany
+                    val vipStr = if (!company.isNullOrBlank() && company != "null") " (VIP - $company)" else ""
+                    sb.append("   Khách: ${item.customerName} (${item.customerEmail ?: "N/A"})$vipStr\n")
+                }
+                sb.append("   Lỗi: ${item.lastError ?: "Không rõ lý do"}\n")
+            }
+            conflictListText.text = sb.toString()
+        }
     }
 
     private fun openCamera() {
@@ -513,7 +558,11 @@ class MainActivity : ComponentActivity() {
                     staffId = item.getString("staffId"),
                     scannedAtLocal = item.getString("scannedAtLocal"),
                     syncStatus = item.getString("syncStatus"),
-                    lastError = item.optString("lastError").ifBlank { null }
+                    lastError = item.optString("lastError").ifBlank { null },
+                    customerName = item.optString("customerName").ifBlank { null },
+                    customerEmail = item.optString("customerEmail").ifBlank { null },
+                    customerPhone = item.optString("customerPhone").ifBlank { null },
+                    customerCompany = item.optString("customerCompany").ifBlank { null }
                 )
             )
         }
@@ -534,6 +583,10 @@ class MainActivity : ComponentActivity() {
                     .put("scannedAtLocal", it.scannedAtLocal)
                     .put("syncStatus", it.syncStatus)
                     .put("lastError", it.lastError)
+                    .put("customerName", it.customerName)
+                    .put("customerEmail", it.customerEmail)
+                    .put("customerPhone", it.customerPhone)
+                    .put("customerCompany", it.customerCompany)
             )
         }
         prefs.edit().putString("offlineQueue", array.toString()).apply()
@@ -646,7 +699,11 @@ data class OfflineScan(
     val staffId: String,
     val scannedAtLocal: String,
     val syncStatus: String,
-    val lastError: String?
+    val lastError: String?,
+    val customerName: String? = null,
+    val customerEmail: String? = null,
+    val customerPhone: String? = null,
+    val customerCompany: String? = null
 )
 
 class ApiClient(val baseUrl: String) {
