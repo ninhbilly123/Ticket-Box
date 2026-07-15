@@ -19,6 +19,7 @@
     "test:waiting-room-80k-plus-1": "ts-node --files tests/waiting-room-80k-plus-1-test.ts",
     "test:circuit-breaker": "ts-node --files tests/circuit-breaker-test.ts",
     "test:autocannon": "ts-node --files tests/autocannon-load-test.ts",
+    "test:e2e-features": "ts-node --files tests/e2e-features-smoke-test.ts",
     "db:clean-test": "ts-node --files src/scripts/clean-test-data.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
