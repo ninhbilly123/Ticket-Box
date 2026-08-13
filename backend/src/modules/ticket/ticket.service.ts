@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { OrderStatus, TicketStatus } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
@@ -6,6 +7,8 @@ import { AppError } from '../../shared/lib/errors';
 @Injectable()
 export class TicketService {
   constructor(private readonly prisma: PrismaService) {}
+  private readonly paidOrderStatuses: OrderStatus[] = ['paid', 'PAID'];
+  private readonly activeOrderStatuses: OrderStatus[] = ['pending', 'paid', 'PENDING', 'PAID'];
   /**
    * Book tickets with transaction, per-user limit checking, pessimistic locks, and cache invalidation
    */
@@ -46,7 +49,7 @@ export class TicketService {
             ticketTypeId,
             order: {
               userId,
-              status: { in: ['paid', 'PAID'] },
+              status: { in: this.paidOrderStatuses },
             },
           },
         },
@@ -68,7 +71,7 @@ export class TicketService {
             ticketTypeId,
             order: {
               status: {
-                in: ['pending', 'paid', 'PENDING', 'PAID'],
+                in: this.activeOrderStatuses,
               },
             },
           },
@@ -108,7 +111,7 @@ export class TicketService {
       });
 
       // 5. Create the Ticket records
-      const ticketData = Array.from({ length: quantity }).map((_, index) => ({
+      const ticketData: Array<{ orderItemId: string; userId: string; qrCode: string; status: TicketStatus }> = Array.from({ length: quantity }).map((_, index) => ({
         orderItemId: orderItem.id,
         userId,
         qrCode: `QR-${order.id.slice(0, 8)}-${index}-${Math.floor(1000 + Math.random() * 9000)}`,

@@ -87,7 +87,7 @@ const whitelistSchema = z.object({
   mailboxAddress: z.string().min(3),
   allowedSenderEmail: z.string().min(3),
   subjectKeyword: z.string().min(1),
-  status: z.string().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
 });
 
 

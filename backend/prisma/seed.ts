@@ -1,5 +1,8 @@
+import 'dotenv/config';
+import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import { generateVipGuestQrToken } from '../src/shared/lib/crypto';
 
 const prisma = new PrismaClient();
 
@@ -16,6 +19,10 @@ const ticketCatalog = [
 ];
 
 async function resetDatabase() {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DB_RESET !== 'true') {
+    throw new Error('Refusing to reset a production database without ALLOW_DB_RESET=true.');
+  }
+
   await prisma.auditLog.deleteMany();
   await prisma.guestImportRowError.deleteMany();
   await prisma.whitelistEmailConfig.deleteMany();
@@ -119,7 +126,7 @@ async function createOrderWithTickets(input: {
     ticketTypeId: string;
     quantity: number;
     unitPrice: number;
-    tickets: Array<{ qrCode: string; status: 'valid' | 'used'; seatNumber?: string; usedAt?: Date }>;
+    tickets?: Array<{ qrCode: string; status: 'valid' | 'used'; seatNumber?: string; usedAt?: Date }>;
   }>;
 }) {
   const order = await prisma.order.create({
@@ -143,7 +150,7 @@ async function createOrderWithTickets(input: {
       },
     });
 
-    for (const ticket of item.tickets) {
+    for (const ticket of item.tickets || []) {
       await prisma.ticket.create({
         data: {
           orderItemId: orderItem.id,
@@ -448,7 +455,6 @@ async function main() {
         ticketTypeId: firstTicketTypes.GA,
         quantity: 1,
         unitPrice: 600000,
-        tickets: [{ qrCode: 'TICKET-SKYT-GA-PENDING-001', status: 'valid', seatNumber: 'GA-F401' }],
       },
     ],
   });
@@ -485,30 +491,48 @@ async function main() {
     },
   });
 
+  const vipGuests = [
+    {
+      id: randomUUID(),
+      concertId: firstConcert.id,
+      fullName: 'VIP Guest A',
+      identifier: 'vip.a@example.com',
+      email: 'vip.a@example.com',
+      phone: '0901234501',
+      company: 'Demo Sponsor',
+      zone: 'SVIP',
+      csvBatchId: 'batch_seed_01',
+    },
+    {
+      id: randomUUID(),
+      concertId: firstConcert.id,
+      fullName: 'VIP Guest B',
+      identifier: '0901234567',
+      email: 'vip.b@example.com',
+      phone: '0901234567',
+      company: 'Demo Sponsor',
+      zone: 'VIP',
+      csvBatchId: 'batch_seed_01',
+    },
+    {
+      id: randomUUID(),
+      concertId: secondConcert.id,
+      fullName: 'VIP Guest C',
+      identifier: 'vip.c@example.com',
+      email: 'vip.c@example.com',
+      phone: '0901234503',
+      company: 'Demo Sponsor',
+      zone: 'CAT1',
+      csvBatchId: 'batch_seed_02',
+    },
+  ];
+
   await prisma.vipGuest.createMany({
-    data: [
-      {
-        concertId: firstConcert.id,
-        fullName: 'VIP Guest A',
-        identifier: 'vip.a@example.com',
-        zone: 'SVIP',
-        csvBatchId: 'batch_seed_01',
-      },
-      {
-        concertId: firstConcert.id,
-        fullName: 'VIP Guest B',
-        identifier: '0901234567',
-        zone: 'VIP',
-        csvBatchId: 'batch_seed_01',
-      },
-      {
-        concertId: secondConcert.id,
-        fullName: 'VIP Guest C',
-        identifier: 'vip.c@example.com',
-        zone: 'CAT1',
-        csvBatchId: 'batch_seed_02',
-      },
-    ],
+    data: vipGuests.map((guest) => ({
+      ...guest,
+      qrToken: generateVipGuestQrToken(guest.id),
+      emailStatus: 'QUEUED',
+    })),
   });
 
   await prisma.notification.create({

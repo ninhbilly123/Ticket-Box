@@ -35,7 +35,7 @@ export class AuthMiddleware implements NestMiddleware {
         fullName: user.fullName,
         role: normalizeRole(user.role),
         organizationId: user.organizationId,
-        status: user.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
+        status: 'ACTIVE',
       };
     } catch {
       // Invalid token - continue without user

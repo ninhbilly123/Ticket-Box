@@ -1,13 +1,14 @@
 import { Prisma } from '@prisma/client';
+import type { ConcertStatus, OrderStatus } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
 import { getOrderHoldTtlMs, getOrderHoldTtlSeconds, publishOrderExpirationJob } from './order-expiration';
 
-const PUBLIC_SALE_STATUSES = ['PUBLISHED', 'ON_SALE'];
-const PAID_STATUSES = ['paid', 'PAID'];
-const PENDING_STATUSES = ['pending', 'PENDING'];
+const PUBLIC_SALE_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
+const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
+const PENDING_STATUSES: OrderStatus[] = ['pending', 'PENDING'];
 
 interface HoldOrderItemInput {
   ticketTypeId: string;
@@ -385,7 +386,7 @@ export class OrderHoldService {
 
   private toHoldResponse(order: {
     id: string;
-    status: string;
+    status: OrderStatus;
     totalAmount: number;
     createdAt: Date;
     items: Array<{ ticketTypeId: string; ticketTypeName: string; quantity: number; unitPrice: number }>;

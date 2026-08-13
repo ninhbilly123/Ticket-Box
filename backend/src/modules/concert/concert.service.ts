@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ConcertStatus } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
@@ -14,7 +15,7 @@ import {
   writeTicketAvailabilityCache,
 } from './concert-detail-cache';
 
-const PUBLIC_CONCERT_STATUSES = ['PUBLISHED', 'ON_SALE'];
+const PUBLIC_CONCERT_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
 
 @Injectable()
 export class ConcertService {
@@ -194,7 +195,7 @@ export class ConcertService {
 
     const availability = await this.getConcertAvailability(id);
     const availabilityByTicketType = new Map(
-      availability.ticketTypes.map((ticketType) => [ticketType.id, ticketType.remaining])
+      availability.ticketTypes.map((ticketType: { id: string; remaining: number }) => [ticketType.id, ticketType.remaining])
     );
 
     return {

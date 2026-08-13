@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { OrderStatus, WhitelistConfigStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
@@ -13,7 +14,7 @@ import {
   sanitizeAndValidateSeatMapSvg,
 } from '../../shared/lib/seat-map-svg';
 
-const PAID_STATUSES = ['paid', 'PAID'];
+const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
 
 interface ConcertUpdateInput {
   eventCode?: string;
@@ -490,7 +491,7 @@ export class AdminService {
     mailboxAddress: string;
     allowedSenderEmail: string;
     subjectKeyword: string;
-    status?: string;
+    status?: WhitelistConfigStatus;
   }) {
     const organizationId = this.resolveWritableOrganization(user, input.organizationId);
     if (input.concertId) {
@@ -499,6 +500,9 @@ export class AdminService {
 
     if (!input.mailboxAddress.includes('@') || !input.allowedSenderEmail.includes('@')) {
       throw new AppError(400, 'WHITELIST_CONFIG_INVALID', 'Mailbox and sender email must be valid email-like values.');
+    }
+    if (input.status && !['ACTIVE', 'INACTIVE'].includes(input.status)) {
+      throw new AppError(400, 'WHITELIST_CONFIG_INVALID', 'Whitelist config status is invalid.');
     }
 
     return this.prisma.whitelistEmailConfig.create({
@@ -520,8 +524,14 @@ export class AdminService {
     if (!canManage) throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage this whitelist config.');
 
     const data: Record<string, unknown> = {};
-    for (const field of ['mailboxAddress', 'allowedSenderEmail', 'subjectKeyword', 'status'] as const) {
+    for (const field of ['mailboxAddress', 'allowedSenderEmail', 'subjectKeyword'] as const) {
       if (typeof input[field] === 'string') data[field] = input[field];
+    }
+    if (typeof input.status === 'string') {
+      if (!['ACTIVE', 'INACTIVE'].includes(input.status)) {
+        throw new AppError(400, 'WHITELIST_CONFIG_INVALID', 'Whitelist config status is invalid.');
+      }
+      data.status = input.status;
     }
     return this.prisma.whitelistEmailConfig.update({ where: { id: configId }, data });
   }

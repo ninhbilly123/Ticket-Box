@@ -1,8 +1,11 @@
 import cron from 'node-cron';
+import type { OrderStatus, TicketStatus } from '@prisma/client';
 import { prisma } from '../shared/lib/prisma';
 import { sendEmail } from '../shared/lib/email';
 
 const REMINDER_TYPE = 'concert_reminder_24h';
+const PAID_ORDER_STATUSES: OrderStatus[] = ['paid', 'PAID'];
+const VALID_TICKET_STATUSES: TicketStatus[] = ['valid', 'VALID'];
 
 let reminderCronScheduled = false;
 let reminderRunInProgress = false;
@@ -124,7 +127,7 @@ export async function runConcertReminderScan() {
           lt: windowEnd,
         },
         status: {
-          notIn: ['cancelled', 'CANCELLED'],
+          not: 'CANCELLED',
         },
       },
       select: {
@@ -138,11 +141,11 @@ export async function runConcertReminderScan() {
     for (const concert of concerts) {
       const tickets = await prisma.ticket.findMany({
         where: {
-          status: { in: ['valid', 'VALID'] },
+          status: { in: VALID_TICKET_STATUSES },
           orderItem: {
             order: {
               concertId: concert.id,
-              status: { in: ['paid', 'PAID'] },
+              status: { in: PAID_ORDER_STATUSES },
             },
           },
         },

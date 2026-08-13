@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import type { ConcertStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 
-const PUBLIC_CONCERT_STATUSES = ['PUBLISHED', 'ON_SALE'];
+const PUBLIC_CONCERT_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
 const DEFAULT_RELEASE_PER_MINUTE = 500;
 const DEFAULT_CHECKOUT_TOKEN_TTL_SECONDS = 300;
 
