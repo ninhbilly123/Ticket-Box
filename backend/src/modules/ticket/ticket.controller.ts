@@ -5,6 +5,7 @@ import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { TicketService } from './ticket.service';
 import { AuthorizationService } from '../rbac/authorization.service';
 import { AppError } from '../../shared/lib/errors';
+import { AuthUser } from '../../shared/types/auth';
 
 @Controller('api/v1/tickets')
 export class TicketController {
@@ -19,14 +20,14 @@ export class TicketController {
       success: false,
       error: {
         code: 'LEGACY_BOOKING_DISABLED',
-        message: 'Lu"ng `t vAc cc `A b< vA hiu hA3a. Vui lAng dA1ng /api/v1/orders/hold.',
+        message: 'Luồng đặt vé cũ đã bị vô hiệu hóa. Vui lòng dùng /api/v1/orders/hold.',
       },
     });
   }
 
   @Get('history')
   @UseGuards(AuthGuard)
-  async getHistory(@CurrentUser() user: any, @Res() res: Response) {
+  async getHistory(@CurrentUser() user: AuthUser, @Res() res: Response) {
     const result = await this.ticketService.getHistory(user.id);
 
     return res.status(200).json({
@@ -37,10 +38,10 @@ export class TicketController {
 
   @Get('order/:id')
   @UseGuards(AuthGuard)
-  async getOrder(@Param('id') id: string, @CurrentUser() user: any, @Res() res: Response) {
+  async getOrder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Res() res: Response) {
     const canView = await this.authorizationService.canViewOrder(user, id);
     if (!canView) {
-      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen xem don hang nay.');
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Bạn không có quyền xem đơn hàng này.');
     }
 
     const order = await this.ticketService.getOrderById(id);

@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Param, Body, UseGuards, Req, Res, Query } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Controller, Get, Post, Param, Body, UseGuards, Res, Query } from '@nestjs/common';
+import { Response } from 'express';
 import { AuthGuard } from '../../shared/guards/auth.guard';
 import { RolesGuard } from '../../shared/guards/roles.guard';
 import { Roles } from '../../shared/decorators/roles.decorator';
 import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { CheckinService } from './checkin.service';
 import { AppError } from '../../shared/lib/errors';
+import { AuthUser } from '../../shared/types/auth';
 
 @Controller('api/v1/checkins')
 @UseGuards(AuthGuard, RolesGuard)
@@ -14,13 +15,13 @@ export class CheckinController {
   constructor(private readonly checkinService: CheckinService) {}
 
   @Get('concerts')
-  async listAssignedConcerts(@CurrentUser() user: any, @Res() res: Response) {
+  async listAssignedConcerts(@CurrentUser() user: AuthUser, @Res() res: Response) {
     const result = await this.checkinService.listAssignedConcerts(user.id);
     return res.status(200).json({ success: true, data: result });
   }
 
   @Post('scan')
-  async scanTicket(@CurrentUser() user: any, @Body() body: any, @Res() res: Response) {
+  async scanTicket(@CurrentUser() user: AuthUser, @Body() body: any, @Res() res: Response) {
     const { concertId, qrCode, deviceId, scannedAt } = body;
 
     if (!concertId || !qrCode) {
@@ -39,7 +40,7 @@ export class CheckinController {
   }
 
   @Post('sync')
-  async syncOfflineLogs(@CurrentUser() user: any, @Body() body: any, @Res() res: Response) {
+  async syncOfflineLogs(@CurrentUser() user: AuthUser, @Body() body: any, @Res() res: Response) {
     const { concertId, deviceId, logs } = body;
 
     if (!concertId || !Array.isArray(logs)) {
@@ -56,14 +57,14 @@ export class CheckinController {
   }
 
   @Get('vip-guests')
-  async getVipGuests(@Query('concertId') concertId: string, @Query('query') query: string, @Res() res: Response) {
-    const result = await this.checkinService.getVipGuests(String(concertId || ''), String(query || ''));
+  async getVipGuests(@CurrentUser() user: AuthUser, @Query('concertId') concertId: string, @Query('query') query: string, @Res() res: Response) {
+    const result = await this.checkinService.getVipGuests(String(concertId || ''), String(query || ''), user.id);
     return res.status(200).json({ success: true, data: result });
   }
 
   @Post('vip-guests/:id/checkin')
   async checkinVipGuest(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() body: any,
     @Res() res: Response
@@ -75,8 +76,8 @@ export class CheckinController {
   }
 
   @Get('stats/:concertId')
-  async getCheckinStats(@Param('concertId') concertId: string, @Res() res: Response) {
-    const result = await this.checkinService.getCheckinStats(concertId);
+  async getCheckinStats(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Res() res: Response) {
+    const result = await this.checkinService.getCheckinStats(concertId, user.id);
     return res.status(200).json({ success: true, data: result });
   }
 }

@@ -1,10 +1,17 @@
 import * as crypto from 'crypto';
 import { Injectable } from '@nestjs/common';
+import type { OrderStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
+import { getOrderHoldTtlMs } from '../order/order-expiration';
+
+type PaymentGateway = 'vnpay' | 'momo';
+type ProcessedPaymentStatus = Extract<PaymentStatus, 'SUCCESS' | 'FAILED'>;
+
+const PENDING_ORDER_STATUSES: OrderStatus[] = ['pending', 'PENDING'];
 
 // Helper function to generate VNPAY time format (yyyyMMddHHmmss) in GMT+7
 function getVNPTime(): string {
@@ -122,7 +129,7 @@ export class PaymentService {
    */
   public async createPaymentUrl(params: {
     orderId: string;
-    gateway: 'vnpay' | 'momo';
+    gateway: PaymentGateway;
     returnUrl: string;
     ipAddr: string;
     userId: string;
@@ -145,10 +152,16 @@ export class PaymentService {
     }
 
     if (order.userId !== userId) {
-      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen thanh toan don hang nay.');
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Bạn không có quyền thanh toán đơn hàng này.');
     }
 
-    if (!['pending', 'PENDING'].includes(order.status)) {
+    if (!this.isPayableOrder(order.status, order.createdAt)) {
+      if (PENDING_ORDER_STATUSES.includes(order.status) && !this.isActiveHold(order.createdAt)) {
+        const expiredConcertId = await this.expirePendingOrderHold(order.id);
+        if (expiredConcertId) {
+          await invalidateTicketAvailabilityCache(expiredConcertId, 'payment.expired-hold');
+        }
+      }
       throw new AppError(400, 'INVALID_ORDER_STATUS', 'Đơn hàng không ở trạng thái chờ thanh toán.');
     }
 
@@ -333,7 +346,7 @@ export class PaymentService {
     });
 
     return {
-      success: responseCode === '00',
+      success: updatedPayment?.status === 'SUCCESS',
       payment: updatedPayment,
     };
   }
@@ -344,7 +357,7 @@ export class PaymentService {
    */
   public async processPaymentStatusUpdate(
     paymentId: string,
-    status: 'SUCCESS' | 'FAILED',
+    status: ProcessedPaymentStatus,
     transactionId?: string,
     responseCode?: string
   ) {
@@ -394,14 +407,39 @@ export class PaymentService {
       }
 
       // If already processed order, return early
-      if (order.status !== 'pending' && order.status !== 'PENDING') {
+      if (!PENDING_ORDER_STATUSES.includes(order.status) || !this.isActiveHold(order.createdAt)) {
+        await tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: 'FAILED',
+            transactionId,
+            responseCode,
+          },
+        });
+
+        if (PENDING_ORDER_STATUSES.includes(order.status)) {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: 'expired' },
+          });
+          await tx.ticket.deleteMany({
+            where: {
+              orderItem: {
+                orderId: order.id,
+              },
+            },
+          });
+          await this.releaseReservedInventory(tx, order.orderItems);
+        }
+
         return {
           processed: false,
-          status: order.status,
+          status: 'FAILED',
           orderId: order.id,
           userId: order.userId,
           concertId: order.concertId,
           tickets: [],
+          reason: 'ORDER_NOT_PAYABLE',
         };
       }
 
@@ -491,32 +529,7 @@ export class PaymentService {
           },
         });
 
-        for (const item of order.orderItems) {
-          const inventory = await tx.ticketInventory.findUnique({
-            where: { ticketTypeId: item.ticketTypeId },
-            select: { reservedQuantity: true },
-          });
-          const inventoryReservedToRelease = Math.min(inventory?.reservedQuantity ?? 0, item.quantity);
-          await tx.ticketInventory.update({
-            where: { ticketTypeId: item.ticketTypeId },
-            data: {
-              reservedQuantity: { decrement: inventoryReservedToRelease },
-              availableQuantity: { increment: inventoryReservedToRelease },
-            },
-          });
-
-          const currentTicketType = await tx.ticketType.findUnique({
-            where: { id: item.ticketTypeId },
-            select: { reservedQuantity: true },
-          });
-          const ticketTypeReservedToRelease = Math.min(currentTicketType?.reservedQuantity ?? 0, item.quantity);
-          await tx.ticketType.update({
-            where: { id: item.ticketTypeId },
-            data: {
-              reservedQuantity: { decrement: ticketTypeReservedToRelease },
-            },
-          });
-        }
+        await this.releaseReservedInventory(tx, order.orderItems);
 
         console.log(`[Payment Service] Order ${order.id} marked as FAILED. Reserved seats released.`);
       }
@@ -554,9 +567,11 @@ export class PaymentService {
     });
 
     // 5. Publish messages to RabbitMQ after transaction successfully commits
-    if (result.processed && result.concertId) {
+    if (result.concertId) {
       await invalidateTicketAvailabilityCache(result.concertId, `payment.${String(result.status).toLowerCase()}`);
+    }
 
+    if (result.processed && result.concertId) {
       if (result.status === 'SUCCESS') {
         for (const ticket of (result.tickets || [])) {
           await publishToQueue('ticketbox_notifications', {
@@ -591,11 +606,12 @@ export class PaymentService {
     gateway: string;
     ipAddress: string;
   }) {
+    const gateway = this.normalizeGateway(params.gateway);
     const returnUrl = process.env.VNPAY_RETURN_URL || 'http://localhost:3000/api/v1/payments/vnpay-return';
     return this.createPaymentUrl({
       userId: params.userId,
       orderId: params.orderId,
-      gateway: params.gateway as any,
+      gateway,
       returnUrl,
       ipAddr: params.ipAddress,
     });
@@ -638,5 +654,83 @@ export class PaymentService {
       return this.processPaymentStatusUpdate(paymentId, status);
     }
     return { message: 'Webhook received' };
+  }
+
+  private normalizeGateway(gateway: string): PaymentGateway {
+    const normalized = String(gateway || '').trim().toLowerCase();
+    if (normalized === 'momo') {
+      throw new AppError(400, 'GATEWAY_DISABLED', 'Cổng thanh toán MoMo tạm thời bị vô hiệu hóa. Vui lòng sử dụng VNPAY.');
+    }
+    if (normalized !== 'vnpay') {
+      throw new AppError(400, 'PAYMENT_GATEWAY_INVALID', 'Cổng thanh toán không hợp lệ.');
+    }
+    return 'vnpay';
+  }
+
+  private isActiveHold(createdAt: Date): boolean {
+    return Date.now() <= createdAt.getTime() + getOrderHoldTtlMs();
+  }
+
+  private isPayableOrder(status: OrderStatus, createdAt: Date): boolean {
+    return PENDING_ORDER_STATUSES.includes(status) && this.isActiveHold(createdAt);
+  }
+
+  private async releaseReservedInventory(
+    tx: any,
+    orderItems: Array<{ ticketTypeId: string; quantity: number }>
+  ) {
+    for (const item of orderItems) {
+      const inventory = await tx.ticketInventory.findUnique({
+        where: { ticketTypeId: item.ticketTypeId },
+        select: { reservedQuantity: true },
+      });
+      const inventoryReservedToRelease = Math.min(inventory?.reservedQuantity ?? 0, item.quantity);
+      await tx.ticketInventory.update({
+        where: { ticketTypeId: item.ticketTypeId },
+        data: {
+          reservedQuantity: { decrement: inventoryReservedToRelease },
+          availableQuantity: { increment: inventoryReservedToRelease },
+        },
+      });
+
+      const currentTicketType = await tx.ticketType.findUnique({
+        where: { id: item.ticketTypeId },
+        select: { reservedQuantity: true },
+      });
+      const ticketTypeReservedToRelease = Math.min(currentTicketType?.reservedQuantity ?? 0, item.quantity);
+      await tx.ticketType.update({
+        where: { id: item.ticketTypeId },
+        data: {
+          reservedQuantity: { decrement: ticketTypeReservedToRelease },
+        },
+      });
+    }
+  }
+
+  private async expirePendingOrderHold(orderId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { orderItems: true },
+      });
+
+      if (!order || !PENDING_ORDER_STATUSES.includes(order.status) || this.isActiveHold(order.createdAt)) {
+        return null;
+      }
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: 'expired' },
+      });
+      await tx.ticket.deleteMany({
+        where: {
+          orderItem: {
+            orderId: order.id,
+          },
+        },
+      });
+      await this.releaseReservedInventory(tx, order.orderItems);
+      return order.concertId;
+    });
   }
 }

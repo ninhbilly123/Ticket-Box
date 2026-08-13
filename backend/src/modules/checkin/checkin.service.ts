@@ -1,13 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
-
-import { AuthorizationService } from '../rbac/authorization.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 @Injectable()
 export class CheckinService {
-  constructor(private readonly prisma: PrismaService, private readonly authorizationService: AuthorizationService) {}
+  constructor(private readonly prisma: PrismaService) {}
   public async listAssignedConcerts(staffId: string) {
     const assignments = await this.prisma.staffAssignment.findMany({
       where: { staffId },
@@ -62,6 +60,7 @@ export class CheckinService {
     gateStaffId: string;
   }) {
     const { ticketId, deviceId, scannedAtLocal, concertId, gateStaffId } = params;
+    await this.assertStaffCanScanConcert(gateStaffId, concertId);
 
     // 1. Kiểm tra vé có tồn tại trong database không (chấp nhận cả UUID id hoặc qrCode thường)
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId);
@@ -345,7 +344,8 @@ export class CheckinService {
   /**
    * Tìm kiếm danh sách khách VIP kèm trạng thái vé của họ
    */
-  public async getVipGuests(concertId: string, query: string) {
+  public async getVipGuests(concertId: string, query: string, gateStaffId: string) {
+    await this.assertStaffCanScanConcert(gateStaffId, concertId);
     // 1. Tìm các khách VIP trong bảng vip_guests
     const vipGuests = await this.prisma.vipGuest.findMany({
       where: {
@@ -463,6 +463,8 @@ export class CheckinService {
       throw new AppError(404, 'NOT_FOUND', 'Không tìm thấy thông tin khách VIP.');
     }
 
+    await this.assertStaffCanScanConcert(gateStaffId, guest.concertId);
+
     if (guest.qrToken) {
       return this.scanImportedVipGuest({
         qrToken: guest.qrToken,
@@ -489,7 +491,8 @@ export class CheckinService {
   /**
    * Lấy số liệu thống kê check-in thời gian thực cho Ban tổ chức
    */
-  public async getCheckinStats(concertId: string) {
+  public async getCheckinStats(concertId: string, gateStaffId: string) {
+    await this.assertStaffCanScanConcert(gateStaffId, concertId);
     const ticketTypes = await this.prisma.ticketType.findMany({
       where: { concertId },
     });
@@ -542,6 +545,21 @@ export class CheckinService {
       percent: grandTotal > 0 ? Number(((grandCheckedIn / grandTotal) * 100).toFixed(1)) : 0,
       byTicketType: breakdown,
     };
+  }
+
+  private async assertStaffCanScanConcert(staffId: string, concertId: string) {
+    if (!concertId) {
+      throw new AppError(400, 'BAD_REQUEST', 'Thiếu concertId.');
+    }
+
+    const assignment = await this.prisma.staffAssignment.findFirst({
+      where: { staffId, concertId },
+      select: { id: true },
+    });
+
+    if (!assignment) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Bạn không được phân công soát vé cho concert này.');
+    }
   }
 }
 export default CheckinService;

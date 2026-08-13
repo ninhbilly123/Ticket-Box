@@ -4,6 +4,7 @@ import { AuthGuard } from '../../shared/guards/auth.guard';
 import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { PaymentService } from './payment.service';
 import { AppError } from '../../shared/lib/errors';
+import { AuthUser } from '../../shared/types/auth';
 
 @Controller('api/v1/payments')
 export class PaymentController {
@@ -11,11 +12,11 @@ export class PaymentController {
 
   @Post()
   @UseGuards(AuthGuard)
-  async createPayment(@CurrentUser() user: any, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+  async createPayment(@CurrentUser() user: AuthUser, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const { orderId, gateway } = body;
 
     if (!orderId || !gateway) {
-      throw new AppError(400, 'BAD_REQUEST', 'Thiu thA\'ng tin thanh toA!n: orderId hoA"c gateway.');
+      throw new AppError(400, 'BAD_REQUEST', 'Thiếu thông tin thanh toán: orderId hoặc gateway.');
     }
 
     const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
