@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { Logger } from '@nestjs/common';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 
 export interface ConcertListFilters {
@@ -10,6 +11,7 @@ export interface ConcertListFilters {
 
 const DEFAULT_CACHE_TTL_SECONDS = 60;
 export const CONCERT_LIST_CACHE_KEYS_SET = 'concert:list:keys';
+const logger = new Logger('ConcertListingCache');
 
 function getCacheTtlSeconds() {
   const configured = Number(process.env.CONCERT_LIST_CACHE_TTL || DEFAULT_CACHE_TTL_SECONDS);
@@ -36,20 +38,20 @@ export async function readConcertListCache<T>(filters: ConcertListFilters): Prom
 
   try {
     if (!isRedisReady()) {
-      console.warn('[CACHE SKIP] Redis unavailable');
+      logger.warn('[CACHE SKIP] Redis unavailable');
       return null;
     }
 
     const cached = await runRedisOperation(() => redisClient.get(cacheKey));
     if (!cached) {
-      console.log(`[CACHE MISS] ${cacheKey}`);
+      logger.log(`[CACHE MISS] ${cacheKey}`);
       return null;
     }
 
-    console.log(`[CACHE HIT] ${cacheKey}`);
+    logger.log(`[CACHE HIT] ${cacheKey}`);
     return JSON.parse(cached) as T;
   } catch (error) {
-    console.warn('[CACHE SKIP] Redis unavailable', error);
+    logger.warn('[CACHE SKIP] Redis unavailable', error instanceof Error ? error.stack : String(error));
     return null;
   }
 }
@@ -59,7 +61,7 @@ export async function writeConcertListCache(filters: ConcertListFilters, value: 
 
   try {
     if (!isRedisReady()) {
-      console.warn('[CACHE SKIP] Redis unavailable');
+      logger.warn('[CACHE SKIP] Redis unavailable');
       return;
     }
 
@@ -71,14 +73,14 @@ export async function writeConcertListCache(filters: ConcertListFilters, value: 
         .exec()
     );
   } catch (error) {
-    console.warn('[CACHE SKIP] Redis unavailable', error);
+    logger.warn('[CACHE SKIP] Redis unavailable', error instanceof Error ? error.stack : String(error));
   }
 }
 
 export async function invalidateConcertListCache(reason = 'manual') {
   try {
     if (!isRedisReady()) {
-      console.warn('[CACHE SKIP] Redis unavailable');
+      logger.warn('[CACHE SKIP] Redis unavailable');
       return 0;
     }
 
@@ -87,10 +89,10 @@ export async function invalidateConcertListCache(reason = 'manual') {
       await runRedisOperation(() => redisClient.del(keys));
     }
     await runRedisOperation(() => redisClient.del(CONCERT_LIST_CACHE_KEYS_SET));
-    console.log(`[CACHE INVALIDATED] concert:list (${keys.length} keys, reason=${reason})`);
+    logger.log(`[CACHE INVALIDATED] concert:list (${keys.length} keys, reason=${reason})`);
     return keys.length;
   } catch (error) {
-    console.warn('[CACHE SKIP] Redis unavailable', error);
+    logger.warn('[CACHE SKIP] Redis unavailable', error instanceof Error ? error.stack : String(error));
     return 0;
   }
 }

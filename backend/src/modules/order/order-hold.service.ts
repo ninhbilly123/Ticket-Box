@@ -342,7 +342,7 @@ export class OrderHoldService {
     });
   }
 
-  private async lockInventory(tx: any, ticketTypeId: string): Promise<LockedInventoryRow | null> {
+  private async lockInventory(tx: Prisma.TransactionClient, ticketTypeId: string): Promise<LockedInventoryRow | null> {
     const rows = await tx.$queryRaw<LockedInventoryRow[]>`
       SELECT
         ticket_type_id as "ticketTypeId",
@@ -358,7 +358,7 @@ export class OrderHoldService {
   }
 
   private async countUserActiveQuantity(
-    tx: any,
+    tx: Prisma.TransactionClient,
     userId: string,
     concertId: string,
     ticketTypeId: string,

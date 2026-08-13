@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { connectRabbitMQ } from '../../shared/lib/rabbitmq';
 
 export const DEFAULT_ORDER_HOLD_TTL_SECONDS = 600;
@@ -5,6 +6,7 @@ export const ORDER_EXPIRE_DELAY_QUEUE = process.env.ORDER_EXPIRE_DELAY_QUEUE || 
 export const ORDER_EXPIRE_QUEUE = process.env.ORDER_EXPIRE_QUEUE || 'orders.expire.queue';
 export const ORDER_EXPIRE_DLX = process.env.ORDER_EXPIRE_DLX || 'orders.expire.dlx';
 export const ORDER_EXPIRE_ROUTING_KEY = process.env.ORDER_EXPIRE_ROUTING_KEY || 'orders.expire';
+const logger = new Logger('OrderExpiration');
 
 export interface OrderExpirationMessage {
   type: 'EXPIRE_ORDER';
@@ -50,7 +52,7 @@ export async function publishOrderExpirationJob(orderId: string, delayMs = getOr
       expiration: String(Math.max(0, delayMs)),
     });
   } catch (error) {
-    console.warn(`[Order Expiration] Failed to publish expire job for order ${orderId}`, error);
+    logger.warn(`[Order Expiration] Failed to publish expire job for order ${orderId}`, error instanceof Error ? error.stack : String(error));
     return false;
   }
 }

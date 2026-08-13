@@ -3,6 +3,7 @@ import { ConcertService } from './concert.service';
 import { WaitingRoomService } from './waiting-room.service';
 import { AuthGuard } from '../../shared/guards/auth.guard';
 import { CurrentUser } from '../../shared/decorators/current-user.decorator';
+import { AuthUser } from '../../shared/types/auth';
 
 @Controller('api/v1/concerts')
 export class ConcertController {
@@ -45,7 +46,7 @@ export class ConcertController {
   @UseGuards(AuthGuard)
   public async joinWaitingRoom(
     @Param('concertId') concertId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     const status = await this.waitingRoomService.join(concertId, user.id);
 
@@ -59,7 +60,7 @@ export class ConcertController {
   @UseGuards(AuthGuard)
   public async getWaitingRoomStatus(
     @Param('concertId') concertId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     const status = await this.waitingRoomService.getStatus(concertId, user.id);
 

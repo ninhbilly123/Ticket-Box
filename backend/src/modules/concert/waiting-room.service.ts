@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ConcertStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../shared/modules/prisma.service';
@@ -49,6 +49,8 @@ export function isWaitingRoomEnabled(concertId: string) {
 
 @Injectable()
 export class WaitingRoomService {
+  private readonly logger = new Logger(WaitingRoomService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   public async join(concertId: string, userId: string): Promise<WaitingRoomStatus> {
@@ -103,7 +105,7 @@ export class WaitingRoomService {
     }
 
     if (!isRedisReady()) {
-      console.warn('[WaitingRoom] Redis unavailable, skip release cycle');
+      this.logger.warn('[WaitingRoom] Redis unavailable, skip release cycle');
       return [];
     }
 
@@ -127,7 +129,7 @@ export class WaitingRoomService {
     }
 
     if (userIds.length > 0) {
-      console.log(`[WaitingRoom] Released ${userIds.length} checkout token(s) for concert ${concertId}`);
+      this.logger.log(`[WaitingRoom] Released ${userIds.length} checkout token(s) for concert ${concertId}`);
     }
 
     return { concertId, released: userIds.length };

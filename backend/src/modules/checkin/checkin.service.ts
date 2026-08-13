@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
 @Injectable()
 export class CheckinService {
+  private readonly logger = new Logger(CheckinService.name);
+
   constructor(private readonly prisma: PrismaService) {}
   public async listAssignedConcerts(staffId: string) {
     const assignments = await this.prisma.staffAssignment.findMany({
@@ -170,7 +172,7 @@ export class CheckinService {
         status: 'VALID',
         ticket: {
           id: ticket.id,
-          seatNumber: (ticket as any).seatNumber || null,
+          seatNumber: ticket.seatNumber || null,
           ticketType: ticket.orderItem.ticketType.name,
           usedAt: checkinLog.scannedAtLocal,
         },
@@ -299,7 +301,7 @@ export class CheckinService {
 
     let syncedCount = 0;
     let conflictCount = 0;
-    const conflicts: Array<{ ticketId: string; scannedAtLocal: string; reason: string; customer?: any }> = [];
+    const conflicts: Array<{ ticketId: string; scannedAtLocal: string; reason: string; customer?: unknown }> = [];
 
     for (const log of sortedLogs) {
       try {
@@ -318,16 +320,17 @@ export class CheckinService {
             ticketId: log.ticketId,
             scannedAtLocal: log.scannedAtLocal,
             reason: result.status,
-            customer: (result as any).customer || null,
+            customer: 'customer' in result ? result.customer : null,
           });
           conflictCount++;
         }
-      } catch (err: any) {
-        console.error(`[Checkin Service] Error syncing log for ticket ${log.ticketId}:`, err);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`[Checkin Service] Error syncing log for ticket ${log.ticketId}.`, err instanceof Error ? err.stack : message);
         conflicts.push({
           ticketId: log.ticketId,
           scannedAtLocal: log.scannedAtLocal,
-          reason: `Loi he thong: ${err.message}`,
+          reason: `Loi he thong: ${message}`,
         });
         conflictCount++;
       }

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { connectRabbitMQ } from '../../shared/lib/rabbitmq';
 
 export const CONCERT_LISTING_EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'ticketbox.events';
@@ -11,6 +12,7 @@ export const CONCERT_LISTING_INVALIDATION_ROUTING_KEYS = [
   'concert.cancelled',
   'ticket-type.updated',
 ] as const;
+const logger = new Logger('ConcertListingEvents');
 
 export type ConcertListingInvalidationEventType = (typeof CONCERT_LISTING_INVALIDATION_ROUTING_KEYS)[number];
 
@@ -41,11 +43,11 @@ export async function publishConcertListingInvalidation(
       { persistent: true }
     );
     if (!published) {
-      console.warn(`[RabbitMQ] Concert listing invalidation publish buffered: ${eventType}`);
+      logger.warn(`[RabbitMQ] Concert listing invalidation publish buffered: ${eventType}`);
     }
     return published;
   } catch (error) {
-    console.warn(`[RabbitMQ] Concert listing invalidation publish failed: ${eventType}`, error);
+    logger.warn(`[RabbitMQ] Concert listing invalidation publish failed: ${eventType}`, error instanceof Error ? error.stack : String(error));
     return false;
   }
 }

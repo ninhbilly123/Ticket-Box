@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import type { ConcertStatus } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import type { ConcertStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
@@ -19,6 +19,8 @@ const PUBLIC_CONCERT_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
 
 @Injectable()
 export class ConcertService {
+  private readonly logger = new Logger(ConcertService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -36,7 +38,7 @@ export class ConcertService {
         }
       }
     } catch (err) {
-      console.error(`[Redis Error] Failed to read cache for ${ticketTypeId}:`, err);
+      this.logger.error(`[Redis Error] Failed to read cache for ${ticketTypeId}.`, err instanceof Error ? err.stack : String(err));
     }
 
     // 2. Cache Miss: Prefer inventory counters so pending holds reduce availability.
@@ -52,7 +54,7 @@ export class ConcertService {
         await runRedisOperation(() => redisClient.setEx(cacheKey, 30, remaining.toString()));
       }
     } catch (err) {
-      console.error(`[Redis Error] Failed to set cache for ${ticketTypeId}:`, err);
+      this.logger.error(`[Redis Error] Failed to set cache for ${ticketTypeId}.`, err instanceof Error ? err.stack : String(err));
     }
 
     return remaining;
@@ -74,7 +76,7 @@ export class ConcertService {
 
   private async getConcertsFromDatabase(filters: ConcertListFilters) {
     const { search, artist, date, location } = filters;
-    const whereClause: any = {
+    const whereClause: Prisma.ConcertWhereInput = {
       status: { in: ['PUBLISHED', 'ON_SALE', 'published'] },
     };
 
@@ -186,7 +188,7 @@ export class ConcertService {
    * Fetch single concert details with seat layout and remaining tickets
    */
   public async getConcertById(id: string) {
-    const cached = await readConcertDetailCache<any>(id);
+    const cached = await readConcertDetailCache<Awaited<ReturnType<ConcertService['getConcertDetailFromDatabase']>>>(id);
     const detail = cached || await this.getConcertDetailFromDatabase(id);
 
     if (!cached) {
@@ -200,7 +202,7 @@ export class ConcertService {
 
     return {
       ...detail,
-      ticketTypes: detail.ticketTypes.map((ticketType: any) => ({
+      ticketTypes: detail.ticketTypes.map((ticketType) => ({
         ...ticketType,
         remaining: availabilityByTicketType.get(ticketType.id) ?? 0,
       })),

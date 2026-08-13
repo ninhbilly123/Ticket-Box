@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
-import type { OrderStatus, PaymentStatus } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import type { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
@@ -33,24 +33,15 @@ function getVNPTime(): string {
 }
 
 // Helper function to sort object parameters alphabetically by key (needed for VNPAY hashing)
-export function sortObject(obj: any) {
-  const sorted: any = {};
-  const str = [];
-  let key;
-  for (key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      str.push(encodeURIComponent(key));
-    }
-  }
-  str.sort();
-  for (key = 0; key < str.length; key++) {
-    sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, "+");
-  }
-  return sorted;
+export function sortObject(obj: Record<string, string>) {
+  return Object.keys(obj).sort().reduce<Record<string, string>>((sorted, key) => {
+    sorted[encodeURIComponent(key)] = encodeURIComponent(obj[key]).replace(/%20/g, '+');
+    return sorted;
+  }, {});
 }
 
 // Helper to stringify parameters into key=value joined by &
-function stringifyParams(obj: any): string {
+function stringifyParams(obj: Record<string, string>): string {
   return Object.entries(obj)
     .map(([key, val]) => `${key}=${val}`)
     .join('&');
@@ -66,6 +57,8 @@ function timingSafeStringEqual(left?: string, right?: string): boolean {
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(private readonly prisma: PrismaService) {}
   /**
    * Helper to check Circuit Breaker state on Redis
@@ -99,10 +92,10 @@ export class PaymentService {
     // Set expiry for failure count if not already set (e.g. 5 minutes window)
     await runRedisOperation(() => redisClient.expire(failureKey, 300));
 
-    console.log(`[Circuit Breaker] Gateway ${gateway} failure count: ${failures}/5`);
+    this.logger.log(`[Circuit Breaker] Gateway ${gateway} failure count: ${failures}/5`);
 
     if (failures >= 5) {
-      console.warn(`[Circuit Breaker] Tripping breaker for gateway ${gateway}! State set to OPEN.`);
+      this.logger.warn(`[Circuit Breaker] Tripping breaker for gateway ${gateway}. State set to OPEN.`);
       // Set state to OPEN with 60 seconds TTL (cool-down period)
       await runRedisOperation(() => redisClient.setEx(stateKey, 60, 'OPEN'));
       // Reset failures
@@ -121,7 +114,7 @@ export class PaymentService {
 
     await runRedisOperation(() => redisClient.del(failureKey));
     await runRedisOperation(() => redisClient.del(stateKey));
-    console.log(`[Circuit Breaker] Gateway ${gateway} status reset to CLOSED (Healthy).`);
+    this.logger.log(`[Circuit Breaker] Gateway ${gateway} status reset to CLOSED.`);
   }
 
   /**
@@ -226,8 +219,8 @@ export class PaymentService {
   /**
    * Process webhook transaction result from VNPAY IPN (Webhook)
    */
-  public async processVNPAYIpn(query: any) {
-    const secureHash = query.vnp_SecureHash;
+  public async processVNPAYIpn(query: Record<string, unknown>) {
+    const secureHash = query['vnp_SecureHash'];
 
     const secretKey = process.env.VNPAY_HASH_SECRET;
     if (!secretKey) {
@@ -248,7 +241,7 @@ export class PaymentService {
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
     if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
-      console.error('[VNPAY IPN] Signature validation failed.');
+      this.logger.error('[VNPAY IPN] Signature validation failed.');
       return { RspCode: '97', Message: 'Signature failure' };
     }
 
@@ -263,20 +256,20 @@ export class PaymentService {
     });
 
     if (!payment) {
-      console.error(`[VNPAY IPN] Payment record ${paymentId} not found.`);
+      this.logger.error(`[VNPAY IPN] Payment record ${paymentId} not found.`);
       return { RspCode: '01', Message: 'Order not found' };
     }
 
     // 3. Verify amount (VNPAY amount is multiplied by 100)
     const expectedAmountCent = Math.round(Number(payment.amount) * 100);
     if (Number(vnpAmountStr) !== expectedAmountCent) {
-      console.error(`[VNPAY IPN] Amount mismatch: expected ${expectedAmountCent}, got ${vnpAmountStr}`);
+      this.logger.error(`[VNPAY IPN] Amount mismatch: expected ${expectedAmountCent}, got ${vnpAmountStr}`);
       return { RspCode: '04', Message: 'Amount mismatch' };
     }
 
     // 4. Verify payment is still pending (Idempotency)
     if (payment.status !== 'PENDING') {
-      console.log(`[VNPAY IPN] Payment ${paymentId} already confirmed.`);
+      this.logger.log(`[VNPAY IPN] Payment ${paymentId} already confirmed.`);
       return { RspCode: '02', Message: 'Order already confirmed' };
     }
 
@@ -290,8 +283,8 @@ export class PaymentService {
   /**
    * Process return result from VNPAY redirection (GET vnpay-return)
    */
-  public async processVNPAYReturn(query: any) {
-    const secureHash = query.vnp_SecureHash;
+  public async processVNPAYReturn(query: Record<string, unknown>) {
+    const secureHash = query['vnp_SecureHash'];
 
     const secretKey = process.env.VNPAY_HASH_SECRET;
     if (!secretKey) {
@@ -312,7 +305,7 @@ export class PaymentService {
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
     if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
-      console.error('[VNPAY Return] Signature validation failed.');
+      this.logger.error('[VNPAY Return] Signature validation failed.');
       return { success: false, message: 'Signature failure' };
     }
 
@@ -335,7 +328,7 @@ export class PaymentService {
       try {
         await this.processPaymentStatusUpdate(paymentId, status, transactionNo, responseCode);
       } catch (err) {
-        console.error('[VNPAY Return] Error processing payment update:', err);
+        this.logger.error('[VNPAY Return] Error processing payment update.', err instanceof Error ? err.stack : String(err));
       }
     }
 
@@ -486,7 +479,7 @@ export class PaymentService {
           });
           const inventoryReservedToMove = Math.min(inventory?.reservedQuantity ?? 0, item.quantity);
           const inventoryAvailableToConsume = item.quantity - inventoryReservedToMove;
-          const inventoryUpdate: any = {
+          const inventoryUpdate: Prisma.TicketInventoryUpdateInput = {
             reservedQuantity: { decrement: inventoryReservedToMove },
             soldQuantity: { increment: item.quantity },
           };
@@ -512,7 +505,7 @@ export class PaymentService {
           });
         }
 
-        console.log(`[Payment Service] Order ${order.id} marked as PAID. Tickets activated.`);
+        this.logger.log(`[Payment Service] Order ${order.id} marked as PAID. Tickets activated.`);
       } else {
         // Failed payment: transition order to FAILED
         await tx.order.update({
@@ -531,7 +524,7 @@ export class PaymentService {
 
         await this.releaseReservedInventory(tx, order.orderItems);
 
-        console.log(`[Payment Service] Order ${order.id} marked as FAILED. Reserved seats released.`);
+        this.logger.log(`[Payment Service] Order ${order.id} marked as FAILED. Reserved seats released.`);
       }
 
       // 4. Invalidate Redis Cache for each affected ticket type
@@ -543,7 +536,7 @@ export class PaymentService {
             await runRedisOperation(() => redisClient.del(cacheKey));
           }
         } catch (err) {
-          console.error(`[Redis Invalidation Error] Failed to delete key ${cacheKey}:`, err);
+          this.logger.error(`[Redis Invalidation Error] Failed to delete key ${cacheKey}.`, err instanceof Error ? err.stack : String(err));
         }
       }
 
@@ -617,25 +610,25 @@ export class PaymentService {
     });
   }
 
-  public async handleVNPAYIpn(query: any) {
+  public async handleVNPAYIpn(query: Record<string, unknown>) {
     const res = await this.processVNPAYIpn(query);
     return { code: res.RspCode, message: res.Message };
   }
 
-  public async handleVNPAYReturn(query: any) {
+  public async handleVNPAYReturn(query: Record<string, unknown>) {
     const result = await this.processVNPAYReturn(query);
     const statusText = result.success ? 'Thanh toán thành công' : 'Thanh toán thất bại';
     return `<!DOCTYPE html><html><head><title>Kết quả thanh toán</title></head><body><h1>${statusText}</h1><p>Mã đơn hàng: ${result.payment?.orderId || ''}</p></body></html>`;
   }
 
-  public async renderMockCheckout(query: any) {
+  public async renderMockCheckout(_query: Record<string, unknown>) {
     if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
       throw new AppError(404, 'MOCK_PAYMENT_DISABLED', 'Mock payment checkout is disabled.');
     }
     return `<!DOCTYPE html><html><head><title>Mock Checkout</title></head><body><h1>Mock Payment Gateway</h1></body></html>`;
   }
 
-  public async handleWebhook(body: any, providedSecret?: string) {
+  public async handleWebhook(body: { paymentId?: string; status?: string }, providedSecret?: string) {
     if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
       throw new AppError(404, 'MOCK_PAYMENT_DISABLED', 'Mock payment webhook is disabled.');
     }
@@ -676,7 +669,7 @@ export class PaymentService {
   }
 
   private async releaseReservedInventory(
-    tx: any,
+    tx: Prisma.TransactionClient,
     orderItems: Array<{ ticketTypeId: string; quantity: number }>
   ) {
     for (const item of orderItems) {

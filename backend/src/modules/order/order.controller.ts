@@ -1,10 +1,19 @@
-import { Controller, Post, UseGuards, Body, Headers, Req, Res } from '@nestjs/common';
+import { Controller, Post, UseGuards, Body, Headers, Res } from '@nestjs/common';
+import { z } from 'zod';
 import { AuthGuard } from '../../shared/guards/auth.guard';
 import { OrderHoldService } from './order-hold.service';
 import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { AppError } from '../../shared/lib/errors';
 import { Response } from 'express';
 import { AuthUser } from '../../shared/types/auth';
+
+const holdOrderSchema = z.object({
+  concertId: z.string().uuid(),
+  items: z.array(z.object({
+    ticketTypeId: z.string().uuid(),
+    quantity: z.coerce.number().int().positive(),
+  })).min(1),
+});
 
 @Controller('api/v1/orders')
 export class OrderController {
@@ -14,7 +23,7 @@ export class OrderController {
   @UseGuards(AuthGuard)
   async holdOrder(
     @CurrentUser() user: AuthUser,
-    @Body() body: any,
+    @Body() body: unknown,
     @Headers('idempotency-key') idempotencyKey: string,
     @Res() res: Response,
   ) {
@@ -22,16 +31,13 @@ export class OrderController {
       throw new AppError(400, 'MISSING_IDEMPOTENCY_KEY', 'Idempotency-Key là bắt buộc.');
     }
 
-    const { concertId, items } = body || {};
-    if (!concertId || !Array.isArray(items)) {
-      throw new AppError(400, 'INVALID_QUANTITY', 'concertId và items là bắt buộc.');
-    }
+    const dto = holdOrderSchema.parse(body);
 
     const result = await this.orderHoldService.holdOrder({
       userId: user.id,
-      concertId: String(concertId),
+      concertId: dto.concertId,
       idempotencyKey: String(idempotencyKey),
-      items,
+      items: dto.items,
     });
 
     return res.status(201).json({

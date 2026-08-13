@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderStatus, WhitelistConfigStatus } from '@prisma/client';
+import type { OrderStatus, Prisma, WhitelistConfigStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
 import { AuthUser } from '../../shared/types/auth';
 import { PrismaService } from '../../shared/modules/prisma.service';
@@ -10,9 +9,9 @@ import { normalizeRole } from '../rbac/roles';
 import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
 import {
   assertZoneCode,
-  inspectSeatMapSvg,
   sanitizeAndValidateSeatMapSvg,
 } from '../../shared/lib/seat-map-svg';
+import { AdminReadinessService } from './admin-readiness.service';
 
 const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
 
@@ -46,19 +45,12 @@ interface TicketTypeUpdateInput {
   status?: 'ACTIVE' | 'INACTIVE';
 }
 
-export interface ConcertReadinessCheck {
-  key: string;
-  label: string;
-  status: 'PASS' | 'FAIL' | 'WARNING';
-  message: string;
-  blocking: boolean;
-}
-
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly authorizationService: AuthorizationService
+    private readonly authorizationService: AuthorizationService,
+    private readonly readinessService: AdminReadinessService
   ) {}
   public async listConcerts(user: AuthUser) {
     return this.prisma.concert.findMany({
@@ -156,7 +148,7 @@ export class AdminService {
     if (concert.status !== 'DRAFT') {
       throw new AppError(400, 'CONCERT_INVALID_STATUS_TRANSITION', 'Concert cannot be published from current status.');
     }
-    const readiness = await this.evaluateConcertReadiness(concertId);
+    const readiness = await this.readinessService.evaluateConcertReadiness(concertId);
     if (!readiness.ready) {
       throw new AppError(409, 'CONCERT_NOT_READY', readiness.blockingIssues.join(' '));
     }
@@ -167,7 +159,7 @@ export class AdminService {
 
   public async getConcertReadiness(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    return this.evaluateConcertReadiness(concertId);
+    return this.readinessService.evaluateConcertReadiness(concertId);
   }
 
   public async listConcertArtists(user: AuthUser, concertId: string) {
@@ -177,7 +169,7 @@ export class AdminService {
       include: { artist: true },
       orderBy: { artist: { name: 'asc' } },
     });
-    return relations.map((relation: any) => relation.artist);
+    return relations.map((relation) => relation.artist);
   }
 
   public async addConcertArtist(user: AuthUser, concertId: string, artistName: string) {
@@ -226,7 +218,7 @@ export class AdminService {
     }
     const inspected = sanitizeAndValidateSeatMapSvg(
       file.buffer.toString('utf8'),
-      ticketTypes.map((ticketType: any) => ticketType.zoneCode)
+      ticketTypes.map((ticketType) => ticketType.zoneCode)
     );
     const updated = await this.prisma.concert.update({
       where: { id: concertId },
@@ -280,7 +272,7 @@ export class AdminService {
     this.validateTicketTypeInput(input, concert);
     await this.assertTicketTypeIdentityAvailable(concertId, input.name, zoneCode);
 
-    const ticketType = await this.prisma.$transaction(async (tx: any) => {
+    const ticketType = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const ticketType = await tx.ticketType.create({
         data: {
           concertId,
@@ -399,7 +391,7 @@ export class AdminService {
       throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'New total quantity cannot be less than sold plus reserved quantity.');
     }
 
-    const inventory = await this.prisma.$transaction(async (tx: any) => {
+    const inventory = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.ticketType.update({
         where: { id: ticketTypeId },
         data: {
@@ -674,137 +666,6 @@ export class AdminService {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage another organization.');
     }
     return user.organizationId;
-  }
-
-  private async evaluateConcertReadiness(concertId: string) {
-    const concert = await this.prisma.concert.findUnique({
-      where: { id: concertId },
-      include: {
-        ticketTypes: { include: { inventory: true } },
-        artists: true,
-        staffAssignments: true,
-        artistBios: { where: { status: 'PUBLISHED' }, take: 1 },
-      },
-    });
-    if (!concert) throw new AppError(404, 'CONCERT_NOT_FOUND', 'Concert not found.');
-
-    const checks: ConcertReadinessCheck[] = [];
-    const addCheck = (
-      key: string,
-      label: string,
-      passed: boolean,
-      successMessage: string,
-      failureMessage: string,
-      blocking = true
-    ) => {
-      checks.push({
-        key,
-        label,
-        status: passed ? 'PASS' : (blocking ? 'FAIL' : 'WARNING'),
-        message: passed ? successMessage : failureMessage,
-        blocking,
-      });
-    };
-
-    addCheck(
-      'basic-info',
-      'Thông tin cơ bản',
-      Boolean(concert.eventCode.trim() && concert.name.trim() && concert.venue.trim()),
-      'Mã sự kiện, tên và địa điểm đã đầy đủ.',
-      'Cần bổ sung mã sự kiện, tên và địa điểm.'
-    );
-
-    const scheduleValid = concert.saleOpenAt < concert.startAt && concert.startAt > new Date();
-    addCheck(
-      'schedule',
-      'Lịch sự kiện',
-      scheduleValid,
-      'Thời gian mở bán và biểu diễn hợp lệ.',
-      'Ngày biểu diễn phải ở tương lai và thời gian mở bán phải trước ngày biểu diễn.'
-    );
-
-    addCheck(
-      'artists',
-      'Nghệ sĩ',
-      concert.artists.length > 0,
-      `Đã gắn ${concert.artists.length} nghệ sĩ.`,
-      'Cần gắn ít nhất một nghệ sĩ.'
-    );
-
-    const activeTicketTypes = concert.ticketTypes.filter((ticketType: any) => ticketType.status === 'ACTIVE');
-    const invalidTicketTypes: string[] = [];
-    for (const ticketType of activeTicketTypes) {
-      const totalQuantity = ticketType.inventory?.totalQuantity ?? ticketType.totalQuantity;
-      try {
-        this.validateTicketSaleWindow(ticketType.saleOpenAt, ticketType.saleCloseAt, concert);
-      } catch {
-        invalidTicketTypes.push(`${ticketType.name}: thời gian bán không hợp lệ`);
-      }
-      if (totalQuantity <= 0) invalidTicketTypes.push(`${ticketType.name}: tồn kho phải lớn hơn 0`);
-      if (ticketType.maxPerAccount <= 0 || Number(ticketType.price) < 0) {
-        invalidTicketTypes.push(`${ticketType.name}: giá hoặc giới hạn mua không hợp lệ`);
-      }
-    }
-    addCheck(
-      'ticket-types',
-      'Loại vé và tồn kho',
-      activeTicketTypes.length > 0 && invalidTicketTypes.length === 0,
-      `Có ${activeTicketTypes.length} loại vé active sẵn sàng bán.`,
-      activeTicketTypes.length === 0
-        ? 'Cần ít nhất một loại vé active.'
-        : invalidTicketTypes.join('; ')
-    );
-
-    const zoneCodes = activeTicketTypes.map((ticketType: any) => ticketType.zoneCode);
-    const normalizedZoneCodes = zoneCodes.map((code: any) => assertZoneCode(code));
-    addCheck(
-      'zone-codes',
-      'Mã khu vực',
-      normalizedZoneCodes.length > 0 && new Set(normalizedZoneCodes).size === normalizedZoneCodes.length,
-      'Mã khu vực hợp lệ và không trùng.',
-      'Mỗi loại vé active phải có mã khu vực hợp lệ và duy nhất.'
-    );
-
-    let seatMapValid = !concert.seatMapEnabled;
-    let seatMapMessage = 'Concert không sử dụng sơ đồ; khách hàng sẽ chọn vé từ danh sách.';
-    if (concert.seatMapEnabled) {
-      if (!concert.svgSeatingMap) {
-        seatMapMessage = 'Đã bật sơ đồ nhưng chưa upload file SVG.';
-      } else {
-        try {
-          const inspected = inspectSeatMapSvg(concert.svgSeatingMap, normalizedZoneCodes);
-          seatMapValid = inspected.missingZoneCodes.length === 0 && inspected.unknownZoneCodes.length === 0;
-          seatMapMessage = seatMapValid
-            ? `SVG đã ánh xạ ${inspected.zoneCodes.length} khu vực.`
-            : `SVG thiếu [${inspected.missingZoneCodes.join(', ')}] hoặc thừa [${inspected.unknownZoneCodes.join(', ')}].`;
-        } catch (error) {
-          seatMapMessage = error instanceof Error ? error.message : 'SVG không hợp lệ.';
-        }
-      }
-    }
-    addCheck('seat-map', 'Sơ đồ khu vực', seatMapValid, seatMapMessage, seatMapMessage);
-
-    addCheck(
-      'artist-bio',
-      'Artist Bio',
-      concert.artistBios.length > 0,
-      'Đã có Artist Bio được publish.',
-      'Chưa có Artist Bio được publish; mục này không chặn concert.',
-      false
-    );
-    addCheck(
-      'checkin-staff',
-      'Nhân viên soát vé',
-      concert.staffAssignments.length > 0,
-      `Đã phân công ${concert.staffAssignments.length} vị trí soát vé.`,
-      'Chưa phân công nhân viên soát vé; mục này không chặn concert.',
-      false
-    );
-
-    const blockingIssues = checks
-      .filter((check) => check.blocking && check.status === 'FAIL')
-      .map((check) => `${check.label}: ${check.message}`);
-    return { concertId, ready: blockingIssues.length === 0, checks, blockingIssues };
   }
 
   private validateConcertSchedule(startAt: Date, saleOpenAt: Date, requireFuture: boolean) {

@@ -42,7 +42,7 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(201)
-  public async register(@Body() body: any) {
+  public async register(@Body() body: unknown) {
     const dto = registerSchema.parse(body);
     const result = await this.authService.register(dto);
     return { success: true, data: result };
@@ -50,7 +50,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(200)
-  public async login(@Body() body: any) {
+  public async login(@Body() body: unknown) {
     const dto = loginSchema.parse(body);
     const result = await this.authService.login(dto.email, dto.password);
     return { success: true, data: result };
@@ -58,15 +58,20 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(200)
-  public async logout(@Body() body: any) {
-    const refreshToken = typeof body?.refreshToken === 'string' ? body.refreshToken : undefined;
+  public async logout(@Body() body: unknown) {
+    const refreshToken = typeof body === 'object'
+      && body !== null
+      && 'refreshToken' in body
+      && typeof body.refreshToken === 'string'
+      ? body.refreshToken
+      : undefined;
     const result = await this.authService.logout(refreshToken);
     return { success: true, data: result };
   }
 
   @Post('refresh')
   @HttpCode(200)
-  public async refresh(@Body() body: any) {
+  public async refresh(@Body() body: unknown) {
     const dto = refreshSchema.parse(body);
     const result = await this.authService.refresh(dto.refreshToken);
     return { success: true, data: result };
@@ -81,7 +86,7 @@ export class AuthController {
 
   @Patch('me')
   @UseGuards(AuthGuard)
-  public async updateProfile(@CurrentUser() user: AuthUser, @Body() body: any) {
+  public async updateProfile(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const dto = updateProfileSchema.parse(body);
     const result = await this.authService.updateProfile(user, dto);
     return { success: true, data: result };
@@ -90,7 +95,7 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(200)
   @UseGuards(AuthGuard)
-  public async changePassword(@CurrentUser() user: AuthUser, @Body() body: any) {
+  public async changePassword(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const dto = changePasswordSchema.parse(body);
     const result = await this.authService.changePassword(user, dto);
     return { success: true, data: result };

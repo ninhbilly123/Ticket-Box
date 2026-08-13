@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Body, UseGuards, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { z } from 'zod';
 import { AuthGuard } from '../../shared/guards/auth.guard';
 import { RolesGuard } from '../../shared/guards/roles.guard';
 import { Roles } from '../../shared/decorators/roles.decorator';
@@ -8,6 +9,10 @@ import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { AuthUser } from '../../shared/types/auth';
 import { ArtistBioService } from './artist-bio.service';
 import { AppError } from '../../shared/lib/errors';
+
+const reviewBioSchema = z.object({
+  reviewedContent: z.string().trim().min(1),
+});
 
 @Controller('api/v1/ai/artist-bio')
 @UseGuards(AuthGuard, RolesGuard)
@@ -53,17 +58,14 @@ export class ArtistBioController {
   async reviewBio(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Body() body: any,
+    @Body() body: unknown,
     @Res() res: Response
   ) {
-    const { reviewedContent } = body;
-    if (!reviewedContent) {
-      throw new AppError(400, 'BAD_REQUEST', 'Thiếu nội dung review.');
-    }
+    const dto = reviewBioSchema.parse(body);
 
     const result = await this.artistBioService.reviewBio({
       artistBioId: id,
-      reviewedBio: reviewedContent,
+      reviewedBio: dto.reviewedContent,
       reviewedBy: user.id,
       user,
     });

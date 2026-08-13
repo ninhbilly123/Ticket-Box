@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, UseInterceptors, UploadedFile, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import multer from 'multer';
 import { z } from 'zod';
@@ -90,6 +90,14 @@ const whitelistSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
 });
 
+const whitelistUpdateSchema = whitelistSchema.partial().strict().refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one whitelist field is required.',
+});
+
+const cancelConcertSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+}).default({});
+
 
 @Controller('api/v1/admin')
 @UseGuards(AuthGuard, RolesGuard)
@@ -110,14 +118,14 @@ export class AdminController {
   }
 
   @Post('concerts')
-  public async createConcert(@CurrentUser() user: AuthUser, @Body() body: any) {
+  public async createConcert(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const dto = concertCreateSchema.parse(body);
     const result = await this.adminService.createConcert(user, dto);
     return { success: true, data: result };
   }
 
   @Patch('concerts/:id')
-  public async updateConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+  public async updateConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
     const dto = concertUpdateSchema.parse(body);
     const result = await this.adminService.updateConcert(user, id, dto);
     return { success: true, data: result };
@@ -142,7 +150,7 @@ export class AdminController {
   }
 
   @Post('concerts/:id/artists')
-  public async addConcertArtist(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+  public async addConcertArtist(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
     const dto = artistSchema.parse(body);
     const result = await this.adminService.addConcertArtist(user, id, dto.name);
     return { success: true, data: result };
@@ -158,10 +166,10 @@ export class AdminController {
   @UseInterceptors(FileInterceptor('file', {
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_SEAT_MAP_SIZE },
-    fileFilter: (_req: any, file: any, callback: any) => {
+    fileFilter: (_req: Express.Request, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
       const isSvg = file.mimetype === 'image/svg+xml' || file.originalname.toLowerCase().endsWith('.svg');
       if (isSvg) { callback(null, true); return; }
-      callback(new AppError(400, 'SEAT_MAP_FILE_TYPE_INVALID', 'Chỉ chấp nhận file SVG.'));
+      callback(new AppError(400, 'SEAT_MAP_FILE_TYPE_INVALID', 'Chỉ chấp nhận file SVG.'), false);
     },
   }))
   public async uploadSeatMap(@CurrentUser() user: AuthUser, @Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
@@ -179,8 +187,9 @@ export class AdminController {
   }
 
   @Post('concerts/:id/cancel')
-  public async cancelConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
-    const result = await this.adminService.cancelConcert(user, id, body?.reason);
+  public async cancelConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+    const dto = cancelConcertSchema.parse(body);
+    const result = await this.adminService.cancelConcert(user, id, dto.reason);
     return { success: true, data: result };
   }
 
@@ -191,14 +200,14 @@ export class AdminController {
   }
 
   @Post('concerts/:concertId/ticket-types')
-  public async createTicketType(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: any) {
+  public async createTicketType(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: unknown) {
     const dto = ticketTypeSchema.parse(body);
     const result = await this.adminService.createTicketType(user, concertId, dto);
     return { success: true, data: result };
   }
 
   @Patch('ticket-types/:id')
-  public async updateTicketType(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+  public async updateTicketType(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
     const dto = ticketTypeUpdateSchema.parse(body);
     const result = await this.adminService.updateTicketType(user, id, dto);
     return { success: true, data: result };
@@ -217,7 +226,7 @@ export class AdminController {
   }
 
   @Patch('ticket-types/:id/inventory')
-  public async updateInventory(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+  public async updateInventory(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
     const dto = inventorySchema.parse(body);
     const result = await this.adminService.updateInventory(user, id, dto.totalQuantity);
     return { success: true, data: result };
@@ -230,7 +239,7 @@ export class AdminController {
   }
 
   @Post('concerts/:concertId/staff-assignments')
-  public async createStaffAssignment(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: any) {
+  public async createStaffAssignment(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: unknown) {
     const dto = staffAssignmentSchema.parse(body);
     const result = await this.adminService.createStaffAssignment(user, concertId, dto.staffId, dto.gateId);
     return { success: true, data: result };
@@ -249,15 +258,16 @@ export class AdminController {
   }
 
   @Post('whitelist-email-configs')
-  public async createWhitelistConfig(@CurrentUser() user: AuthUser, @Body() body: any) {
+  public async createWhitelistConfig(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const dto = whitelistSchema.parse(body);
     const result = await this.adminService.createWhitelistConfig(user, dto);
     return { success: true, data: result };
   }
 
   @Patch('whitelist-email-configs/:id')
-  public async updateWhitelistConfig(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
-    const result = await this.adminService.updateWhitelistConfig(user, id, body);
+  public async updateWhitelistConfig(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+    const dto = whitelistUpdateSchema.parse(body);
+    const result = await this.adminService.updateWhitelistConfig(user, id, dto);
     return { success: true, data: result };
   }
 
@@ -286,7 +296,7 @@ export class AdminController {
   }
 
   @Post('staff')
-  public async createStaffUser(@CurrentUser() user: AuthUser, @Body() body: any) {
+  public async createStaffUser(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const dto = staffCreateSchema.parse(body);
     const result = await this.adminService.createStaffUser(user, dto);
     return { success: true, data: result };
