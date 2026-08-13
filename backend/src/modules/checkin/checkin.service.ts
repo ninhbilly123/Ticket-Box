@@ -1,10 +1,15 @@
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
+
+import { AuthorizationService } from '../rbac/authorization.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
 
+@Injectable()
 export class CheckinService {
+  constructor(private readonly prisma: PrismaService, private readonly authorizationService: AuthorizationService) {}
   public async listAssignedConcerts(staffId: string) {
-    const assignments = await prisma.staffAssignment.findMany({
+    const assignments = await this.prisma.staffAssignment.findMany({
       where: { staffId },
       select: {
         gateId: true,
@@ -60,7 +65,7 @@ export class CheckinService {
 
     // 1. Kiểm tra vé có tồn tại trong database không (chấp nhận cả UUID id hoặc qrCode thường)
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId);
-    const ticket = await prisma.ticket.findFirst({
+    const ticket = await this.prisma.ticket.findFirst({
       where: {
         OR: [
           ...(isUuid ? [{ id: ticketId }] : []),
@@ -100,7 +105,7 @@ export class CheckinService {
     }
 
     // 3. Kiểm tra ngày diễn ra concert (WRONG_DATE)
-    const concert = await prisma.concert.findUnique({
+    const concert = await this.prisma.concert.findUnique({
       where: { id: concertId },
     });
 
@@ -120,7 +125,7 @@ export class CheckinService {
     }
 
     // 4. Kiểm tra vé đã được check-in trước đó chưa
-    const existingCheckin = await prisma.checkinLog.findFirst({
+    const existingCheckin = await this.prisma.checkinLog.findFirst({
       where: {
         ticketId: ticket.id,
         synced: true, // Lượt quét thành công đã đồng bộ
@@ -137,7 +142,7 @@ export class CheckinService {
     }
 
     // 5. Ghi nhận check-in thành công theo kiểu atomic để chống quét trùng đồng thời.
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updatedTicket = await tx.ticket.updateMany({
         where: { id: ticket.id, status: 'valid' },
         data: {
@@ -178,7 +183,7 @@ export class CheckinService {
       return result;
     }
 
-    const latestCheckin = await prisma.checkinLog.findFirst({
+    const latestCheckin = await this.prisma.checkinLog.findFirst({
       where: { ticketId: ticket.id, synced: true },
       orderBy: { scannedAtLocal: 'asc' },
     });
@@ -192,7 +197,7 @@ export class CheckinService {
       };
     }
 
-    const latestTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+    const latestTicket = await this.prisma.ticket.findUnique({ where: { id: ticket.id } });
     return {
       status: latestTicket?.status === 'cancelled' ? 'CANCELLED' : 'INVALID_TICKET',
       customer,
@@ -206,7 +211,7 @@ export class CheckinService {
     deviceId: string;
   }) {
     const { qrToken, scannedAtLocal, concertId, deviceId } = params;
-    const guest = await prisma.vipGuest.findUnique({
+    const guest = await this.prisma.vipGuest.findUnique({
       where: { qrToken },
       include: { concert: true },
     });
@@ -246,12 +251,12 @@ export class CheckinService {
       };
     }
 
-    const updated = await prisma.vipGuest.updateMany({
+    const updated = await this.prisma.vipGuest.updateMany({
       where: { id: guest.id, ticketStatus: 'VALID' },
       data: { ticketStatus: 'USED', checkedInAt: scannedAt },
     });
     if (updated.count === 0) {
-      const latest = await prisma.vipGuest.findUnique({ where: { id: guest.id } });
+      const latest = await this.prisma.vipGuest.findUnique({ where: { id: guest.id } });
       return {
         status: latest?.ticketStatus === 'CANCELLED' ? 'CANCELLED' : 'ALREADY_USED',
         checkedInAt: latest?.checkedInAt || null,
@@ -342,7 +347,7 @@ export class CheckinService {
    */
   public async getVipGuests(concertId: string, query: string) {
     // 1. Tìm các khách VIP trong bảng vip_guests
-    const vipGuests = await prisma.vipGuest.findMany({
+    const vipGuests = await this.prisma.vipGuest.findMany({
       where: {
         concertId,
         ...(query
@@ -386,7 +391,7 @@ export class CheckinService {
         (value): value is string => Boolean(value)
       );
       const user = contacts.length
-        ? await prisma.user.findFirst({
+        ? await this.prisma.user.findFirst({
             where: {
               OR: contacts.flatMap((contact) => [{ email: contact }, { phone: contact }]),
             },
@@ -398,7 +403,7 @@ export class CheckinService {
 
       if (user) {
         // 3. Tìm vé của User thuộc Concert này
-        ticket = await prisma.ticket.findFirst({
+        ticket = await this.prisma.ticket.findFirst({
           where: {
             userId: user.id,
             orderItem: {
@@ -417,7 +422,7 @@ export class CheckinService {
         });
 
         if (ticket) {
-          checkinLog = await prisma.checkinLog.findFirst({
+          checkinLog = await this.prisma.checkinLog.findFirst({
             where: {
               ticketId: ticket.id,
               synced: true,
@@ -450,7 +455,7 @@ export class CheckinService {
    * Soát vé trực tiếp cho khách VIP bằng cách kích hoạt vé của họ
    */
   public async checkinVipGuest(vipGuestId: string, deviceId: string, gateStaffId: string) {
-    const guest = await prisma.vipGuest.findUnique({
+    const guest = await this.prisma.vipGuest.findUnique({
       where: { id: vipGuestId },
     });
 
@@ -468,7 +473,7 @@ export class CheckinService {
     }
 
     const qrToken = generateVipGuestQrToken(guest.id);
-    await prisma.vipGuest.update({
+    await this.prisma.vipGuest.update({
       where: { id: guest.id },
       data: { qrToken },
     });
@@ -485,7 +490,7 @@ export class CheckinService {
    * Lấy số liệu thống kê check-in thời gian thực cho Ban tổ chức
    */
   public async getCheckinStats(concertId: string) {
-    const ticketTypes = await prisma.ticketType.findMany({
+    const ticketTypes = await this.prisma.ticketType.findMany({
       where: { concertId },
     });
 
@@ -495,7 +500,7 @@ export class CheckinService {
 
     for (const tt of ticketTypes) {
       // Đếm tổng số vé đã phát hành bán thành công của hạng này
-      const total = await prisma.ticket.count({
+      const total = await this.prisma.ticket.count({
         where: {
           orderItem: {
             ticketTypeId: tt.id,
@@ -507,7 +512,7 @@ export class CheckinService {
       });
 
       // Đếm số vé đã được quét soát thành công
-      const checkedIn = await prisma.ticket.count({
+      const checkedIn = await this.prisma.ticket.count({
         where: {
           orderItem: {
             ticketTypeId: tt.id,

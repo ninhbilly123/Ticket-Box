@@ -1,6 +1,7 @@
 import { parse } from 'csv-parse/sync';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken } from '../../shared/lib/crypto';
 import { AuthUser } from '../../shared/types/auth';
@@ -30,7 +31,9 @@ interface RowErrorInput {
   message: string;
 }
 
+@Injectable()
 export class VipGuestSyncService {
+  constructor(private readonly prisma: PrismaService) {}
   private requireOrganization(user: AuthUser): string {
     if (user.role !== 'ORGANIZER' || !user.organizationId) {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Organizer organization is required.');
@@ -41,7 +44,7 @@ export class VipGuestSyncService {
   private async assertEventCodesBelongToOrganization(eventCodes: string[], organizationId: string) {
     if (eventCodes.length === 0) return;
 
-    const concerts = await prisma.concert.findMany({
+    const concerts = await this.prisma.concert.findMany({
       where: { eventCode: { in: eventCodes } },
       select: { eventCode: true, organizationId: true },
     });
@@ -66,13 +69,13 @@ export class VipGuestSyncService {
     const allowedEventCodes = params.allowedEventCodes || [];
     await this.assertEventCodesBelongToOrganization(allowedEventCodes, organizationId);
 
-    const existing = await prisma.sponsorEmail.findUnique({ where: { email } });
+    const existing = await this.prisma.sponsorEmail.findUnique({ where: { email } });
     if (existing && existing.organizationId !== organizationId) {
       throw new AppError(409, 'SPONSOR_EMAIL_EXISTS', 'Email nhan hang da duoc cau hinh cho organization khac.');
     }
 
     if (existing) {
-      return prisma.sponsorEmail.update({
+      return this.prisma.sponsorEmail.update({
         where: { id: existing.id },
         data: {
           displayName: params.displayName,
@@ -83,7 +86,7 @@ export class VipGuestSyncService {
       });
     }
 
-    return prisma.sponsorEmail.create({
+    return this.prisma.sponsorEmail.create({
       data: {
         email,
         organizationId,
@@ -98,7 +101,7 @@ export class VipGuestSyncService {
     params: { displayName?: string; isActive?: boolean; allowedEventCodes?: string[]; user: AuthUser }
   ) {
     const organizationId = this.requireOrganization(params.user);
-    const sponsor = await prisma.sponsorEmail.findUnique({ where: { id } });
+    const sponsor = await this.prisma.sponsorEmail.findUnique({ where: { id } });
     if (!sponsor || sponsor.organizationId !== organizationId) {
       throw new AppError(404, 'SPONSOR_EMAIL_NOT_FOUND', 'Khong tim thay email nhan hang.');
     }
@@ -106,7 +109,7 @@ export class VipGuestSyncService {
       await this.assertEventCodesBelongToOrganization(params.allowedEventCodes, organizationId);
     }
 
-    return prisma.sponsorEmail.update({
+    return this.prisma.sponsorEmail.update({
       where: { id },
       data: {
         displayName: params.displayName,
@@ -118,12 +121,12 @@ export class VipGuestSyncService {
 
   public async listSponsorEmails(user: AuthUser) {
     const organizationId = this.requireOrganization(user);
-    return prisma.sponsorEmail.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.sponsorEmail.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } });
   }
 
   public async listImportReports(user: AuthUser) {
     const organizationId = this.requireOrganization(user);
-    return prisma.guestImportJob.findMany({
+    return this.prisma.guestImportJob.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
       include: { rowErrors: true },
@@ -132,7 +135,7 @@ export class VipGuestSyncService {
 
   public async getImportReport(id: string, user: AuthUser) {
     const organizationId = this.requireOrganization(user);
-    const report = await prisma.guestImportJob.findUnique({
+    const report = await this.prisma.guestImportJob.findUnique({
       where: { id },
       include: { rowErrors: true, vipGuests: true },
     });
@@ -143,7 +146,7 @@ export class VipGuestSyncService {
   }
 
   public async createNoFileReport(): Promise<void> {
-    await prisma.guestImportJob.create({
+    await this.prisma.guestImportJob.create({
       data: {
         status: 'NO_FILE',
         errorMessage: 'Khong tim thay file CSV hop le trong mailbox vao thoi diem cron chay.',
@@ -154,7 +157,7 @@ export class VipGuestSyncService {
   }
 
   public async createMailboxErrorReport(errorMessage: string): Promise<void> {
-    await prisma.guestImportJob.create({
+    await this.prisma.guestImportJob.create({
       data: {
         status: 'FAILED',
         errorMessage: `Khong doc duoc mailbox IMAP: ${errorMessage}`,
@@ -171,12 +174,12 @@ export class VipGuestSyncService {
     content: Buffer;
   }) {
     const senderEmail = params.senderEmail.trim().toLowerCase();
-    const sponsor = await prisma.sponsorEmail.findFirst({
+    const sponsor = await this.prisma.sponsorEmail.findFirst({
       where: { email: senderEmail, isActive: true },
     });
 
     if (!sponsor) {
-      await prisma.guestImportJob.create({
+      await this.prisma.guestImportJob.create({
         data: {
           status: 'FAILED',
           senderEmail,
@@ -190,7 +193,7 @@ export class VipGuestSyncService {
       return null;
     }
 
-    const existing = await prisma.guestImportJob.findFirst({
+    const existing = await this.prisma.guestImportJob.findFirst({
       where: {
         mailboxMessageId: params.messageId,
         originalFileName: params.fileName,
@@ -208,7 +211,7 @@ export class VipGuestSyncService {
       contentType: 'text/csv',
     });
 
-    return prisma.guestImportJob.create({
+    return this.prisma.guestImportJob.create({
       data: {
         status: 'PENDING',
         organizationId: sponsor.organizationId,
@@ -221,12 +224,12 @@ export class VipGuestSyncService {
   }
 
   public async processImportJob(importJobId: string) {
-    const importJob = await prisma.guestImportJob.findUnique({ where: { id: importJobId } });
+    const importJob = await this.prisma.guestImportJob.findUnique({ where: { id: importJobId } });
     if (!importJob || !importJob.objectKey) {
       throw new AppError(404, 'IMPORT_JOB_NOT_FOUND', 'Khong tim thay import job hoac file CSV.');
     }
 
-    await prisma.guestImportJob.update({
+    await this.prisma.guestImportJob.update({
       where: { id: importJobId },
       data: { status: 'PROCESSING', startedAt: new Date(), errorMessage: null },
     });
@@ -246,7 +249,7 @@ export class VipGuestSyncService {
       }
 
       const sponsor = importJob.senderEmail
-        ? await prisma.sponsorEmail.findFirst({
+        ? await this.prisma.sponsorEmail.findFirst({
             where: { email: importJob.senderEmail.toLowerCase(), isActive: true },
           })
         : null;
@@ -265,7 +268,7 @@ export class VipGuestSyncService {
           continue;
         }
 
-        const concert = await prisma.concert.findUnique({
+        const concert = await this.prisma.concert.findUnique({
           where: { eventCode: row.eventCode as string },
         });
         if (!concert) {
@@ -287,7 +290,7 @@ export class VipGuestSyncService {
           continue;
         }
 
-        const existingGuest = await prisma.vipGuest.findFirst({
+        const existingGuest = await this.prisma.vipGuest.findFirst({
           where: {
             concertId: concert.id,
             OR: [
@@ -302,7 +305,7 @@ export class VipGuestSyncService {
           continue;
         }
 
-        const guest = await prisma.vipGuest.create({
+        const guest = await this.prisma.vipGuest.create({
           data: {
             concertId: concert.id,
             fullName: row.fullName as string,
@@ -318,7 +321,7 @@ export class VipGuestSyncService {
         });
 
         const qrToken = generateVipGuestQrToken(guest.id);
-        await prisma.vipGuest.update({ where: { id: guest.id }, data: { qrToken } });
+        await this.prisma.vipGuest.update({ where: { id: guest.id }, data: { qrToken } });
 
         if (row.email) {
           await getEmailQueue().add('sendVipGuestTicketEmail', {
@@ -332,7 +335,7 @@ export class VipGuestSyncService {
       }
 
       if (rowErrors.length > 0) {
-        await prisma.guestImportRowError.createMany({
+        await this.prisma.guestImportRowError.createMany({
           data: rowErrors.map((error) => ({
             guestImportJobId: importJobId,
             rowNumber: error.rowNumber,
@@ -351,7 +354,7 @@ export class VipGuestSyncService {
             ? 'PARTIAL_SUCCESS'
             : 'SUCCESS';
 
-      return prisma.guestImportJob.update({
+      return this.prisma.guestImportJob.update({
         where: { id: importJobId },
         data: {
           status,
@@ -366,7 +369,7 @@ export class VipGuestSyncService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'CSV import failed';
-      return prisma.guestImportJob.update({
+      return this.prisma.guestImportJob.update({
         where: { id: importJobId },
         data: {
           status: 'FAILED',

@@ -1,7 +1,7 @@
 import { prisma } from '../src/shared/lib/prisma';
 import { OrderHoldService } from '../src/modules/order/order-hold.service';
 
-const orderHoldService = new OrderHoldService();
+const orderHoldService = new OrderHoldService(prisma as any);
 
 async function main() {
   console.log('=== Khởi chạy User Limit Concurrency Test (IM03) ===');

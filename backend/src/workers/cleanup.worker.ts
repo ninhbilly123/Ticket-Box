@@ -1,5 +1,9 @@
-import { orderHoldService } from '../modules/order/order-hold.service';
+import { OrderHoldService } from '../modules/order/order-hold.service';
+import { prisma } from '../shared/lib/prisma';
+import { PrismaService } from '../shared/modules/prisma.service';
 import { invalidateTicketAvailabilityCache } from '../modules/concert/concert-detail-cache';
+
+const orderHoldService = new OrderHoldService(prisma as unknown as PrismaService);
 
 /**
  * Safety fallback for expired pending orders.

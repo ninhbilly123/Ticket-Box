@@ -1,6 +1,8 @@
 import { prisma } from '../src/shared/lib/prisma';
 import redisClient, { runRedisOperation } from '../src/shared/lib/redis';
-import { waitingRoomService } from '../src/modules/concert/waiting-room.service';
+import { WaitingRoomService } from '../src/modules/concert/waiting-room.service';
+
+const waitingRoomService = new WaitingRoomService(prisma as any);
 
 async function main() {
   console.log('=== Khởi chạy Waiting Room 80,000 + 1 Sessions Test ===');

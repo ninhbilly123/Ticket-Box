@@ -1,10 +1,13 @@
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
+
+import { AuthorizationService } from '../rbac/authorization.service';
 import { AppError } from '../../shared/lib/errors';
 import { ARTIST_BIO_BUCKET, safeObjectName, uploadObject } from '../../shared/lib/storage';
 import { getAiBioQueue } from '../../shared/lib/job-queues';
 import { invalidateConcertDetailCache } from '../concert/concert-detail-cache';
 import { AuthUser } from '../../shared/types/auth';
-import { authorizationService } from '../rbac/authorization.service';
+
 
 function hasReplacementCharacter(value: string) {
   return value.includes('\uFFFD');
@@ -20,9 +23,11 @@ function assertReadableVietnameseBio(value: string) {
   }
 }
 
+@Injectable()
 export class ArtistBioService {
+  constructor(private readonly prisma: PrismaService, private readonly authorizationService: AuthorizationService) {}
   private async assertCanManageConcert(user: AuthUser, concertId: string) {
-    const allowed = await authorizationService.canManageConcert(user, concertId);
+    const allowed = await this.authorizationService.canManageConcert(user, concertId);
     if (!allowed) {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen quan ly AI bio cua concert nay.');
     }
@@ -45,7 +50,7 @@ export class ArtistBioService {
       throw new AppError(400, 'INVALID_FILE_TYPE', 'Chi chap nhan file PDF.');
     }
 
-    const concert = await prisma.concert.findUnique({ where: { id: concertId } });
+    const concert = await this.prisma.concert.findUnique({ where: { id: concertId } });
     if (!concert) {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Khong tim thay concert.');
     }
@@ -59,7 +64,7 @@ export class ArtistBioService {
       contentType: 'application/pdf',
     });
 
-    const artistBio = await prisma.artistBio.create({
+    const artistBio = await this.prisma.artistBio.create({
       data: {
         concertId,
         sourcePdfObjectKey: objectKey,
@@ -74,13 +79,13 @@ export class ArtistBioService {
   }
 
   public async getLatestByConcert(concertId: string, user: AuthUser) {
-    const concert = await prisma.concert.findUnique({ where: { id: concertId } });
+    const concert = await this.prisma.concert.findUnique({ where: { id: concertId } });
     if (!concert) {
       throw new AppError(404, 'CONCERT_NOT_FOUND', 'Khong tim thay concert.');
     }
     await this.assertCanManageConcert(user, concertId);
 
-    return prisma.artistBio.findFirst({
+    return this.prisma.artistBio.findFirst({
       where: { concertId },
       orderBy: { createdAt: 'desc' },
     });
@@ -92,7 +97,7 @@ export class ArtistBioService {
       throw new AppError(400, 'BIO_CONTENT_REQUIRED', 'Noi dung bio da duyet khong duoc de trong.');
     }
 
-    const artistBio = await prisma.artistBio.findUnique({ where: { id: artistBioId } });
+    const artistBio = await this.prisma.artistBio.findUnique({ where: { id: artistBioId } });
     if (!artistBio) {
       throw new AppError(404, 'ARTIST_BIO_NOT_FOUND', 'Khong tim thay ban ghi AI bio.');
     }
@@ -109,7 +114,7 @@ export class ArtistBioService {
     const normalizedReviewedBio = reviewedBio.trim();
     assertReadableVietnameseBio(normalizedReviewedBio);
 
-    const reviewedArtistBio = await prisma.artistBio.update({
+    const reviewedArtistBio = await this.prisma.artistBio.update({
       where: { id: artistBioId },
       data: {
         reviewedBio: normalizedReviewedBio,
@@ -122,7 +127,7 @@ export class ArtistBioService {
   }
 
   public async publishBio(artistBioId: string, user: AuthUser) {
-    const artistBio = await prisma.artistBio.findUnique({ where: { id: artistBioId } });
+    const artistBio = await this.prisma.artistBio.findUnique({ where: { id: artistBioId } });
     if (!artistBio) {
       throw new AppError(404, 'ARTIST_BIO_NOT_FOUND', 'Khong tim thay ban ghi AI bio.');
     }
@@ -138,12 +143,12 @@ export class ArtistBioService {
 
     assertReadableVietnameseBio(artistBio.reviewedBio);
 
-    await prisma.artistBio.updateMany({
+    await this.prisma.artistBio.updateMany({
       where: { concertId: artistBio.concertId, status: 'PUBLISHED' },
       data: { status: 'APPROVED', publishedAt: null },
     });
 
-    const publishedBio = await prisma.artistBio.update({
+    const publishedBio = await this.prisma.artistBio.update({
       where: { id: artistBioId },
       data: {
         publishedBio: artistBio.reviewedBio,

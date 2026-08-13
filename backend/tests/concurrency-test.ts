@@ -2,7 +2,7 @@ import { prisma } from '../src/shared/lib/prisma';
 import { OrderHoldService } from '../src/modules/order/order-hold.service';
 import crypto from 'crypto';
 
-const orderHoldService = new OrderHoldService();
+const orderHoldService = new OrderHoldService(prisma as any);
 
 async function main() {
   console.log('=== Khởi chạy Concurrency Test (Anti-Overselling) ===');

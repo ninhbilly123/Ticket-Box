@@ -1,4 +1,5 @@
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import {
@@ -15,7 +16,10 @@ import {
 
 const PUBLIC_CONCERT_STATUSES = ['PUBLISHED', 'ON_SALE'];
 
+@Injectable()
 export class ConcertService {
+  constructor(private readonly prisma: PrismaService) {}
+
   /**
    * Helper to retrieve remaining tickets for a ticket type with Redis Cache-aside (TTL 30s)
    */
@@ -35,7 +39,7 @@ export class ConcertService {
     }
 
     // 2. Cache Miss: Prefer inventory counters so pending holds reduce availability.
-    const inventory = await prisma.ticketInventory.findUnique({
+    const inventory = await this.prisma.ticketInventory.findUnique({
       where: { ticketTypeId },
       select: { availableQuantity: true },
     });
@@ -126,7 +130,7 @@ export class ConcertService {
       }
     }
 
-    const concerts = await prisma.concert.findMany({
+    const concerts = await this.prisma.concert.findMany({
       where: whereClause,
       include: {
         ticketTypes: true,
@@ -217,7 +221,7 @@ export class ConcertService {
   }
 
   private async getConcertDetailFromDatabase(id: string) {
-    const concert = await prisma.concert.findFirst({
+    const concert = await this.prisma.concert.findFirst({
       where: {
         id,
         status: { in: PUBLIC_CONCERT_STATUSES },
@@ -275,7 +279,7 @@ export class ConcertService {
   }
 
   private async getConcertAvailabilityFromDatabase(id: string) {
-    const concert = await prisma.concert.findFirst({
+    const concert = await this.prisma.concert.findFirst({
       where: {
         id,
         status: { in: PUBLIC_CONCERT_STATUSES },
@@ -315,4 +319,3 @@ export class ConcertService {
     };
   }
 }
-export default ConcertService;

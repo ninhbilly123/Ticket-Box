@@ -1,6 +1,12 @@
 import crypto from 'crypto';
 
-const SECRET_KEY = process.env.QR_SECRET_KEY || 'default_secret_key_for_dev_only';
+function getQrSecretKey() {
+  const secret = process.env.QR_SECRET_KEY;
+  if (!secret || secret.trim().length < 32 || secret === 'default_secret_key_for_dev_only') {
+    throw new Error('QR_SECRET_KEY must be set to a non-default secret with at least 32 characters.');
+  }
+  return secret;
+}
 
 /**
  * Generate a secure QR token using HMAC SHA256
@@ -8,11 +14,11 @@ const SECRET_KEY = process.env.QR_SECRET_KEY || 'default_secret_key_for_dev_only
  * @returns A hex string representing the secure QR token
  */
 export function generateQrToken(ticketId: string): string {
-  return crypto.createHmac('sha256', SECRET_KEY).update(ticketId).digest('hex');
+  return crypto.createHmac('sha256', getQrSecretKey()).update(ticketId).digest('hex');
 }
 
 export function generateVipGuestQrToken(vipGuestId: string): string {
-  return crypto.createHmac('sha256', SECRET_KEY).update(`vip-guest:${vipGuestId}`).digest('hex');
+  return crypto.createHmac('sha256', getQrSecretKey()).update(`vip-guest:${vipGuestId}`).digest('hex');
 }
 
 /**

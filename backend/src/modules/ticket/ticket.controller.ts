@@ -1,84 +1,53 @@
-import { Request, Response, NextFunction } from 'express';
+import { Controller, Get, Post, Param, UseGuards, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { TicketService } from './ticket.service';
-import { authorizationService } from '../rbac/authorization.service';
+import { AuthorizationService } from '../rbac/authorization.service';
 import { AppError } from '../../shared/lib/errors';
 
-const ticketService = new TicketService();
-
+@Controller('api/v1/tickets')
 export class TicketController {
-  public async bookTickets(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { userId, concertId, ticketTypeId, quantity } = req.body;
+  constructor(
+    private readonly ticketService: TicketService,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
 
-      if (!userId || !concertId || !ticketTypeId || quantity === undefined) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'BAD_REQUEST',
-            message: 'Thiếu các thông tin bắt buộc: userId, concertId, ticketTypeId, quantity.',
-          },
-        });
-      }
-
-      const result = await ticketService.bookTickets({
-        userId: String(userId),
-        concertId: String(concertId),
-        ticketTypeId: String(ticketTypeId),
-        quantity: Number(quantity),
-      });
-
-      return res.status(201).json({
-        success: true,
-        data: result,
-      });
-    } catch (err) {
-      next(err);
-    }
+  @Post('book')
+  async bookTickets(@Res() res: Response) {
+    return res.status(410).json({
+      success: false,
+      error: {
+        code: 'LEGACY_BOOKING_DISABLED',
+        message: 'Lu"ng `t vAc cc `A b< vA hiu hA3a. Vui lAng dA1ng /api/v1/orders/hold.',
+      },
+    });
   }
 
-  public async getOrder(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) {
-        throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
-      }
+  @Get('history')
+  @UseGuards(AuthGuard)
+  async getHistory(@CurrentUser() user: any, @Res() res: Response) {
+    const result = await this.ticketService.getHistory(user.id);
 
-      const { id } = req.params;
-      const canView = await authorizationService.canViewOrder(req.user, id);
-      if (!canView) {
-        throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen xem don hang nay.');
-      }
-
-      const order = await ticketService.getOrderById(id);
-
-      return res.status(200).json({
-        success: true,
-        data: order,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
   }
 
-  public async getHistory(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Vui lòng đăng nhập để xem lịch sử đơn hàng.',
-          },
-        });
-      }
-
-      const result = await ticketService.getHistory(req.user.id);
-
-      return res.status(200).json({
-        success: true,
-        data: result,
-      });
-    } catch (err) {
-      next(err);
+  @Get('order/:id')
+  @UseGuards(AuthGuard)
+  async getOrder(@Param('id') id: string, @CurrentUser() user: any, @Res() res: Response) {
+    const canView = await this.authorizationService.canViewOrder(user, id);
+    if (!canView) {
+      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Ban khong co quyen xem don hang nay.');
     }
+
+    const order = await this.ticketService.getOrderById(id);
+
+    return res.status(200).json({
+      success: true,
+      data: order,
+    });
   }
 }

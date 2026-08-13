@@ -6,7 +6,8 @@ const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     const apiHost = hostname === 'localhost' || hostname === '::1' ? '127.0.0.1' : hostname;
-    return `http://${apiHost}:3000/api/v1`;
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${apiHost}:3000/api/v1`;
   }
 
   return 'http://127.0.0.1:3000/api/v1';

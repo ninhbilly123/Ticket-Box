@@ -1,8 +1,11 @@
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 
+@Injectable()
 export class TicketService {
+  constructor(private readonly prisma: PrismaService) {}
   /**
    * Book tickets with transaction, per-user limit checking, pessimistic locks, and cache invalidation
    */
@@ -19,7 +22,7 @@ export class TicketService {
     }
 
     // Wrap in interactive transaction
-    return await prisma.$transaction(async (tx) => {
+    return await this.prisma.$transaction(async (tx) => {
       // 1. Acquire pessimistic lock on the TicketType record to prevent concurrent updates on the inventory
       const ticketTypes: any[] = await tx.$queryRaw`
         SELECT id, price, total_quantity as "totalQuantity", max_per_account as "maxLimitPerUser"
@@ -150,7 +153,7 @@ export class TicketService {
    * Retrieve order details by ID
    */
   public async getOrderById(orderId: string) {
-    const order = await prisma.order.findUnique({
+    const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
         orderItems: {
@@ -182,7 +185,7 @@ export class TicketService {
    * Retrieve order/ticket purchase history for a specific user
    */
   public async getHistory(userId: string) {
-    const orders = await prisma.order.findMany({
+    const orders = await this.prisma.order.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       include: {

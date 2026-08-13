@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { prisma } from '../../shared/lib/prisma';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 
@@ -45,7 +46,10 @@ export function isWaitingRoomEnabled(concertId: string) {
   return parseEnabledConcertIds().has(concertId);
 }
 
-class WaitingRoomService {
+@Injectable()
+export class WaitingRoomService {
+  constructor(private readonly prisma: PrismaService) {}
+
   public async join(concertId: string, userId: string): Promise<WaitingRoomStatus> {
     await this.assertWaitingRoomAvailable(concertId);
 
@@ -150,7 +154,7 @@ class WaitingRoomService {
   }
 
   private async assertWaitingRoomAvailable(concertId: string) {
-    const concert = await prisma.concert.findFirst({
+    const concert = await this.prisma.concert.findFirst({
       where: {
         id: concertId,
         status: { in: PUBLIC_CONCERT_STATUSES },
@@ -190,5 +194,3 @@ class WaitingRoomService {
     }
   }
 }
-
-export const waitingRoomService = new WaitingRoomService();

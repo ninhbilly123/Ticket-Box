@@ -1,9 +1,11 @@
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/app.module';
 import { prisma } from '../src/shared/lib/prisma';
 import { PaymentService } from '../src/modules/payment/payment.service';
-import app from '../src/app';
 import http from 'http';
 
-const paymentService = new PaymentService();
+const paymentService = new PaymentService(prisma as any);
 
 async function getRequest(url: string): Promise<{ status: number; data: any }> {
   return new Promise((resolve, reject) => {
@@ -24,10 +26,11 @@ async function getRequest(url: string): Promise<{ status: number; data: any }> {
 async function main() {
   console.log('=== Khởi chạy Circuit Breaker & Graceful Degradation Test (IM13) ===');
 
-  // 1. Khởi chạy Express Server động
+  // 1. Khởi chạy NestJS API Server động
   console.log('1. Khởi chạy API Server trên cổng ngẫu nhiên...');
-  const server = app.listen(0);
-  const address = server.address();
+  const app = await NestFactory.create(AppModule, { logger: false });
+  await app.listen(0);
+  const address = app.getHttpServer().address();
   if (!address || typeof address !== 'object') {
     throw new Error('Failed to bind server port');
   }
@@ -40,7 +43,7 @@ async function main() {
   console.log(`- HTTP Status = ${concertListRes.status} (Kỳ vọng: 200)`);
   if (concertListRes.status !== 200) {
     console.error('❌ Lỗi: Không thể lấy danh sách concert.');
-    server.close();
+    await app.close();
     process.exit(1);
   }
   console.log('✅ Luồng xem concert hoạt động bình thường.');
@@ -75,7 +78,7 @@ async function main() {
   // 6. Reset Circuit Breaker để trả lại trạng thái bình thường cho hệ thống
   console.log('\n6. Đang khôi phục lại Circuit Breaker (Reset về CLOSED)...');
   await paymentService.recordSuccess(gateway);
-  server.close();
+  await app.close();
 
   if (isCircuitOpen && concertListResAfterTrip.status === 200) {
     console.log('\n✅ ĐẠT YÊU CẦU: Circuit Breaker tự động chuyển sang OPEN để cô lập lỗi thanh toán, trong khi luồng xem concert vẫn hoạt động bình thường (Graceful Degradation).');

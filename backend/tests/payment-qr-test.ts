@@ -2,8 +2,8 @@ import { prisma } from '../src/shared/lib/prisma';
 import { OrderHoldService } from '../src/modules/order/order-hold.service';
 import { PaymentService } from '../src/modules/payment/payment.service';
 
-const orderHoldService = new OrderHoldService();
-const paymentService = new PaymentService();
+const orderHoldService = new OrderHoldService(prisma as any);
+const paymentService = new PaymentService(prisma as any);
 
 async function main() {
   console.log('=== Khởi chạy Payment & QR Code Verification Test (IM02) ===');

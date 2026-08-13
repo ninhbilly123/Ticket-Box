@@ -1,7 +1,11 @@
 import { NextFunction, Request, Response } from 'express';
 import redisClient, { isRedisReady, runRedisOperation } from '../lib/redis';
 import { AppError } from '../lib/errors';
-import { waitingRoomService } from '../../modules/concert/waiting-room.service';
+import { WaitingRoomService } from '../../modules/concert/waiting-room.service';
+import { prisma } from '../lib/prisma';
+import { PrismaService } from '../modules/prisma.service';
+
+const waitingRoomService = new WaitingRoomService(prisma as unknown as PrismaService);
 
 const DEFAULT_WINDOW_SECONDS = 60;
 const DEFAULT_USER_LIMIT = 5;

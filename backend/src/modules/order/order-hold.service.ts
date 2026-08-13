@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
 import { getOrderHoldTtlMs, getOrderHoldTtlSeconds, publishOrderExpirationJob } from './order-expiration';
@@ -28,7 +29,9 @@ interface LockedInventoryRow {
   soldQuantity: number;
 }
 
+@Injectable()
 export class OrderHoldService {
+  constructor(private readonly prisma: PrismaService) {}
   public async holdOrder(input: HoldOrderInput) {
     const normalizedIdempotencyKey = input.idempotencyKey.trim();
     if (!normalizedIdempotencyKey) {
@@ -42,7 +45,7 @@ export class OrderHoldService {
     }
 
     try {
-      const order = await prisma.$transaction(async (tx) => {
+      const order = await this.prisma.$transaction(async (tx) => {
         const now = new Date();
         const concert = await tx.concert.findFirst({
           where: {
@@ -197,7 +200,7 @@ export class OrderHoldService {
   }
 
   public async expireOrderIfDue(orderId: string, now = new Date()) {
-    return prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: orderId },
         include: {
@@ -269,7 +272,7 @@ export class OrderHoldService {
 
   public async expireOldPendingOrders() {
     const cutoff = new Date(Date.now() - getOrderHoldTtlMs());
-    const orders = await prisma.order.findMany({
+    const orders = await this.prisma.order.findMany({
       where: {
         status: { in: PENDING_STATUSES },
         createdAt: { lt: cutoff },
@@ -305,7 +308,7 @@ export class OrderHoldService {
   }
 
   private async findOrderByIdempotencyKey(idempotencyKey: string) {
-    return prisma.order.findUnique({
+    return this.prisma.order.findUnique({
       where: { idempotencyKey },
       include: {
         orderItems: {
@@ -406,4 +409,4 @@ export class OrderHoldService {
   }
 }
 
-export const orderHoldService = new OrderHoldService();
+

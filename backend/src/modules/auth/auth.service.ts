@@ -1,7 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../../shared/lib/prisma';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { AuthUser, JwtPayload, Role } from '../../shared/types/auth';
 import { normalizeRole } from '../rbac/roles';
@@ -29,7 +30,10 @@ export interface PublicUser {
   status: string;
 }
 
+@Injectable()
 export class AuthService {
+  constructor(private readonly prisma: PrismaService) {}
+
   public toPublicUser(user: {
     id: string;
     email: string;
@@ -56,13 +60,13 @@ export class AuthService {
     fullName: string;
     phone?: string;
   }) {
-    const existing = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
+    const existing = await this.prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
     if (existing) {
       throw new AppError(400, 'AUTH_EMAIL_EXISTS', 'Email is already registered.');
     }
 
     const passwordHash = await bcrypt.hash(input.password, 10);
-    const user = await prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         email: input.email.toLowerCase(),
         passwordHash,
@@ -78,7 +82,7 @@ export class AuthService {
   }
 
   public async login(email: string, password: string) {
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await this.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
     if (!user || user.status === 'DISABLED') {
       throw new AppError(401, 'AUTH_INVALID_CREDENTIALS', 'Email or password is incorrect.');
     }
@@ -93,7 +97,7 @@ export class AuthService {
   }
 
   public async me(user: AuthUser) {
-    const latest = await prisma.user.findUnique({ where: { id: user.id } });
+    const latest = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!latest) {
       throw new AppError(404, 'USER_NOT_FOUND', 'User not found.');
     }
@@ -104,7 +108,7 @@ export class AuthService {
     fullName?: string;
     phone?: string | null;
   }) {
-    const updated = await prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
         ...(typeof input.fullName === 'string' ? { fullName: input.fullName.trim() } : {}),
@@ -119,7 +123,7 @@ export class AuthService {
     currentPassword: string;
     newPassword: string;
   }) {
-    const latest = await prisma.user.findUnique({ where: { id: user.id } });
+    const latest = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!latest) {
       throw new AppError(404, 'USER_NOT_FOUND', 'User not found.');
     }
@@ -134,7 +138,7 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: user.id },
       data: { passwordHash },
     });
@@ -144,7 +148,7 @@ export class AuthService {
 
   public async refresh(refreshToken: string) {
     const tokenHash = this.hashToken(refreshToken);
-    const stored = await prisma.refreshToken.findUnique({
+    const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
       include: { user: true },
     });
@@ -153,7 +157,7 @@ export class AuthService {
       throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Refresh token is invalid or expired.');
     }
 
-    await prisma.refreshToken.update({
+    await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
@@ -168,12 +172,12 @@ export class AuthService {
     }
 
     const tokenHash = this.hashToken(refreshToken);
-    const stored = await prisma.refreshToken.findUnique({ where: { tokenHash } });
+    const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
     if (!stored || stored.revokedAt) {
       return { revoked: false };
     }
 
-    await prisma.refreshToken.update({
+    await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
@@ -182,7 +186,7 @@ export class AuthService {
   }
 
   private async issueTokens(userId: string) {
-    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
@@ -194,7 +198,7 @@ export class AuthService {
     const refreshToken = crypto.randomBytes(48).toString('base64url');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
 
-    await prisma.refreshToken.create({
+    await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
         tokenHash: this.hashToken(refreshToken),
@@ -209,5 +213,3 @@ export class AuthService {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 }
-
-export const authService = new AuthService();

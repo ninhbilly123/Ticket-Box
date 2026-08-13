@@ -1,33 +1,64 @@
-import app from '../src/app';
+import 'reflect-metadata';
+import { performance } from 'perf_hooks';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/app.module';
 import { prisma } from '../src/shared/lib/prisma';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-const autocannon = require('autocannon');
+
+async function runConcurrentRequests(params: {
+  amount: number;
+  concurrency: number;
+  task: (index: number) => Promise<number>;
+}) {
+  const latencies: number[] = [];
+  let sent = 0;
+  let non2xx = 0;
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < params.amount) {
+      const currentIndex = nextIndex++;
+      const startedAt = performance.now();
+      const status = await params.task(currentIndex);
+      latencies.push(performance.now() - startedAt);
+      sent++;
+      if (status < 200 || status >= 300) {
+        non2xx++;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: params.concurrency }, () => worker()));
+  const latencyAverage = latencies.length
+    ? latencies.reduce((sum, value) => sum + value, 0) / latencies.length
+    : 0;
+
+  return { sent, non2xx, latencyAverage };
+}
 
 async function main() {
-  console.log('=== Khởi chạy Autocannon Concurrency Load Test ===');
+  console.log('=== Starting HTTP concurrency load test ===');
 
-  // Tạm thời tăng giới hạn Rate Limit trong quá trình chạy Load Test để tránh bị block 429
   process.env.HOLD_ORDER_USER_RATE_LIMIT = '1000';
   process.env.HOLD_ORDER_IP_RATE_LIMIT = '1000';
 
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) {
-    console.error('Lỗi: Cần cấu hình biến môi trường JWT_SECRET để ký token.');
+    console.error('JWT_SECRET is required to sign test tokens.');
     process.exit(1);
   }
 
-  // 1. Tạo tổ chức và concert thử nghiệm
-  console.log('1. Thiết lập Concert và cấu hình tồn kho (GA = 100 vé)...');
+  console.log('1. Creating test concert and inventory...');
   const org = await prisma.organization.create({
-    data: { name: `Test Org Autocannon ${Date.now()}` },
+    data: { name: `Test Org Load ${Date.now()}` },
   });
 
   const organizer = await prisma.user.create({
     data: {
-      email: `organizer-ac-${Date.now()}@example.com`,
+      email: `organizer-load-${Date.now()}@example.com`,
       passwordHash: 'dummy',
-      fullName: 'Organizer Autocannon',
+      fullName: 'Organizer Load',
       role: 'ORGANIZER',
       organizationId: org.id,
       status: 'ACTIVE',
@@ -36,11 +67,11 @@ async function main() {
 
   const concert = await prisma.concert.create({
     data: {
-      eventCode: `CONC-AC-${Date.now()}`,
+      eventCode: `CONC-LOAD-${Date.now()}`,
       organizerId: organizer.id,
       organizationId: org.id,
-      name: 'Autocannon Concert Load Test',
-      venue: 'Autocannon Arena',
+      name: 'HTTP Load Test Concert',
+      venue: 'HTTP Load Arena',
       startAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
       saleOpenAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
       status: 'ON_SALE',
@@ -54,11 +85,10 @@ async function main() {
       zoneCode: 'ZONE-GA',
       price: 100000,
       totalQuantity: 100,
-      maxPerAccount: 50, // Đảm bảo giới hạn cá nhân không bị vi phạm khi test 100 vé với 10 users
+      maxPerAccount: 50,
     },
   });
 
-  // Tồn kho đúng 100 vé
   await prisma.ticketInventory.create({
     data: {
       ticketTypeId: ticketType.id,
@@ -69,24 +99,23 @@ async function main() {
     },
   });
 
-  // 2. Tạo 10 tài khoản Audience và ký JWT tokens
-  console.log('2. Đang tạo 10 tài khoản Audience giả lập và ký JWT...');
+  console.log('2. Creating 10 audience users and JWT tokens...');
   const tokens: string[] = [];
   const users = [];
 
   for (let i = 0; i < 10; i++) {
     const user = await prisma.user.create({
       data: {
-        email: `aud-ac-${i}-${Date.now()}@example.com`,
+        email: `aud-load-${i}-${Date.now()}@example.com`,
         passwordHash: 'dummy',
-        fullName: `Audience AC ${i}`,
+        fullName: `Audience Load ${i}`,
         role: 'AUDIENCE',
         status: 'ACTIVE',
       },
     });
     users.push(user);
 
-    const token = jwt.sign(
+    tokens.push(jwt.sign(
       {
         sub: user.id,
         email: user.email,
@@ -94,88 +123,77 @@ async function main() {
         organizationId: null,
       },
       jwtSecret,
-      { expiresIn: '1h' }
-    );
-    tokens.push(token);
+      { expiresIn: '1h' },
+    ));
   }
 
-  // 3. Khởi chạy Express Server động
-  console.log('3. Khởi chạy API Server trên cổng ngẫu nhiên...');
-  const server = app.listen(0);
-  const address = server.address();
-  if (!address || typeof address !== 'object') {
-    throw new Error('Failed to bind server port');
-  }
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-  console.log(`- Server đang lắng nghe tại: ${baseUrl}`);
-
-  // 4. Thiết lập 200 HTTP requests với Idempotency-Key và JWT khác nhau
-  console.log('4. Chuẩn bị 200 HTTP requests đặt giữ vé song song...');
-  const requests: any[] = [];
-  for (let i = 0; i < 200; i++) {
-    requests.push({
-      method: 'POST',
-      path: '/api/v1/orders/hold',
-      headers: {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${tokens[i % tokens.length]}`,
-      },
-      body: JSON.stringify({
-        concertId: concert.id,
-        items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
-      }),
-      // Sử dụng hook setupRequest của Autocannon để sinh Idempotency-Key động trước khi render request buffer
-      setupRequest: (req: any) => {
-        req.headers['idempotency-key'] = `idem-ac-${crypto.randomUUID()}`;
-        return req;
-      }
-    });
-  }
-
-  // 5. Chạy Autocannon Load Test
-  console.log('5. Đang chạy Autocannon Load Test (10 connections, 200 requests)...');
+  let nestApp: any;
   try {
-    const result = await autocannon({
-      url: baseUrl,
-      connections: 10,
+    console.log('3. Starting API server on a random port...');
+    nestApp = await NestFactory.create(AppModule, { logger: false });
+    await nestApp.listen(0);
+    const address = nestApp.getHttpServer().address();
+    if (!address || typeof address !== 'object') {
+      throw new Error('Failed to bind server port');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    console.log(`- Server listening at: ${baseUrl}`);
+    console.log('4. Running 200 hold-order requests with 10 workers...');
+
+    const result = await runConcurrentRequests({
       amount: 200,
-      requests,
+      concurrency: 10,
+      task: async (index) => {
+        const response = await fetch(`${baseUrl}/api/v1/orders/hold`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${tokens[index % tokens.length]}`,
+            'idempotency-key': `idem-load-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({
+            concertId: concert.id,
+            items: [{ ticketTypeId: ticketType.id, quantity: 1 }],
+          }),
+        });
+        await response.arrayBuffer();
+        return response.status;
+      },
     });
 
-    console.log('\n=== KẾT QUẢ TẢI AUTOCANNON ===');
-    console.log(`- Tổng số request hoàn tất: ${result.requests.sent}`);
-    console.log(`- Lượng băng thông: ${result.throughput.average} bytes/s`);
-    console.log(`- Thời gian trung bình (Latency): ${result.latency.average} ms`);
-    console.log(`- Số request lỗi (Non-2xx): ${result.non2xx}`);
-    console.log(`- Số request thành công (2xx): ${result.requests.sent - result.non2xx}`);
+    console.log('\n=== LOAD TEST RESULT ===');
+    console.log(`- Requests completed: ${result.sent}`);
+    console.log(`- Average latency: ${result.latencyAverage.toFixed(2)} ms`);
+    console.log(`- Non-2xx responses: ${result.non2xx}`);
+    console.log(`- 2xx responses: ${result.sent - result.non2xx}`);
 
-    // Kiểm tra kho vé thực tế trong DB
     const finalInventory = await prisma.ticketInventory.findUnique({
       where: { ticketTypeId: ticketType.id },
     });
 
-    console.log('\n=== TRẠNG THÁI KHO VÉ SAU KHI TẢI ===');
-    console.log(`- Tồn kho khả dụng còn lại: ${finalInventory?.availableQuantity}`);
-    console.log(`- Tồn kho được giữ chỗ: ${finalInventory?.reservedQuantity}`);
+    console.log('\n=== INVENTORY AFTER LOAD ===');
+    console.log(`- Available quantity: ${finalInventory?.availableQuantity}`);
+    console.log(`- Reserved quantity: ${finalInventory?.reservedQuantity}`);
 
     if (finalInventory?.availableQuantity === 0 && finalInventory?.reservedQuantity === 100) {
-      console.log('\n✅ ĐẠT YÊU CẦU: Autocannon đã bắn 200 request liên tục, PostgreSQL Lock chặn đứng ở đúng 100 vé thành công, không hề bị bán lố!');
+      console.log('\nPASS: PostgreSQL locking held inventory at exactly 100 successful holds.');
     } else {
-      console.log('\n❌ THẤT BẠI: Phát hiện bán lố vé hoặc dữ liệu tồn kho bị sai lệch!');
+      console.log('\nFAIL: Inventory state indicates oversell or reservation drift.');
     }
-
   } catch (error) {
-    console.error('Lỗi khi chạy Autocannon:', error);
+    console.error('Load test failed:', error);
   } finally {
-    // 6. Dọn dẹp dữ liệu
-    console.log('\n6. Đang dọn dẹp dữ liệu test...');
-    server.close();
+    console.log('\n5. Cleaning test data...');
+    if (nestApp) {
+      await nestApp.close();
+    }
 
     const orderIds = await prisma.order.findMany({
       where: { concertId: concert.id },
       select: { id: true },
     });
-    const ids = orderIds.map((o) => o.id);
+    const ids = orderIds.map((order) => order.id);
 
     if (ids.length > 0) {
       await prisma.ticket.deleteMany({ where: { orderItem: { orderId: { in: ids } } } });
@@ -186,11 +204,11 @@ async function main() {
     await prisma.ticketInventory.delete({ where: { ticketTypeId: ticketType.id } });
     await prisma.ticketType.delete({ where: { id: ticketType.id } });
     await prisma.concert.delete({ where: { id: concert.id } });
-    await prisma.user.deleteMany({ where: { id: { in: [...users.map((u) => u.id), organizer.id] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [...users.map((user) => user.id), organizer.id] } } });
     await prisma.organization.delete({ where: { id: org.id } });
+    await prisma.$disconnect();
 
-    console.log('=== Dọn dẹp thành công! ===');
-    process.exit(0);
+    console.log('=== Cleanup completed ===');
   }
 }
 

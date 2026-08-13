@@ -1,121 +1,82 @@
-import { NextFunction, Request, Response } from 'express';
+import { Controller, Get, Post, Param, Body, UseGuards, Req, Res, Query } from '@nestjs/common';
+import { Request, Response } from 'express';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { RolesGuard } from '../../shared/guards/roles.guard';
+import { Roles } from '../../shared/decorators/roles.decorator';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 import { CheckinService } from './checkin.service';
-import { authorizationService } from '../rbac/authorization.service';
-import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
 
-const checkinService = new CheckinService();
-
+@Controller('api/v1/checkins')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('CHECKIN_STAFF')
 export class CheckinController {
-  private async assertAssigned(req: Request, concertId: string) {
-    const allowed = await authorizationService.canScanConcert(req.user!, concertId);
-    if (!allowed) {
-      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Bạn chưa được phân công soát vé cho concert này.');
-    }
+  constructor(private readonly checkinService: CheckinService) {}
+
+  @Get('concerts')
+  async listAssignedConcerts(@CurrentUser() user: any, @Res() res: Response) {
+    const result = await this.checkinService.listAssignedConcerts(user.id);
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async listAssignedConcerts(req: Request, res: Response, next: NextFunction) {
-    try {
-      const concerts = await checkinService.listAssignedConcerts(req.user!.id);
-      return res.status(200).json({ success: true, data: concerts });
-    } catch (error) {
-      return next(error);
+  @Post('scan')
+  async scanTicket(@CurrentUser() user: any, @Body() body: any, @Res() res: Response) {
+    const { concertId, qrCode, deviceId, scannedAt } = body;
+
+    if (!concertId || !qrCode) {
+      throw new AppError(400, 'BAD_REQUEST', 'Thiếu concertId hoặc qrCode.');
     }
+
+    const result = await this.checkinService.scanTicket({
+      ticketId: qrCode,
+      deviceId: deviceId || 'ONLINE_STAFF',
+      scannedAtLocal: scannedAt || new Date().toISOString(),
+      concertId,
+      gateStaffId: user.id,
+    });
+
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async scanTicket(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { ticketId, deviceId, scannedAtLocal, concertId } = req.body;
-      if (!ticketId || !deviceId || !scannedAtLocal || !concertId) {
-        throw new AppError(400, 'BAD_REQUEST', 'Thiếu ticketId, deviceId, scannedAtLocal hoặc concertId.');
-      }
+  @Post('sync')
+  async syncOfflineLogs(@CurrentUser() user: any, @Body() body: any, @Res() res: Response) {
+    const { concertId, deviceId, logs } = body;
 
-      await this.assertAssigned(req, String(concertId));
-      const result = await checkinService.scanTicket({
-        ticketId: String(ticketId),
-        deviceId: String(deviceId),
-        scannedAtLocal: String(scannedAtLocal),
-        concertId: String(concertId),
-        gateStaffId: req.user!.id,
-      });
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
+    if (!concertId || !Array.isArray(logs)) {
+      throw new AppError(400, 'BAD_REQUEST', 'Thiếu concertId hoặc logs không phải là mảng.');
     }
+
+    const result = await this.checkinService.syncOfflineLogs({
+      concertId,
+      deviceId: deviceId || 'OFFLINE_SYNC',
+      logs,
+      gateStaffId: user.id,
+    });
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async syncOfflineLogs(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { concertId, deviceId, logs } = req.body;
-      if (!concertId || !deviceId || !Array.isArray(logs)) {
-        throw new AppError(400, 'BAD_REQUEST', 'Cần concertId, deviceId và logs dạng mảng.');
-      }
-
-      await this.assertAssigned(req, String(concertId));
-      const result = await checkinService.syncOfflineLogs({
-        concertId: String(concertId),
-        deviceId: String(deviceId),
-        logs,
-        gateStaffId: req.user!.id,
-      });
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('vip-guests')
+  async getVipGuests(@Query('concertId') concertId: string, @Query('query') query: string, @Res() res: Response) {
+    const result = await this.checkinService.getVipGuests(String(concertId || ''), String(query || ''));
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async getVipGuests(req: Request, res: Response, next: NextFunction) {
-    try {
-      const concertId = String(req.query.concertId || '');
-      if (!concertId) {
-        throw new AppError(400, 'BAD_REQUEST', 'Thiếu concertId trong query parameter.');
-      }
+  @Post('vip-guests/:id/checkin')
+  async checkinVipGuest(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Res() res: Response
+  ) {
+    const { deviceId } = body;
+    const result = await this.checkinService.checkinVipGuest(id, deviceId || 'MANUAL_CHECKIN', user.id);
 
-      await this.assertAssigned(req, concertId);
-      const result = await checkinService.getVipGuests(concertId, String(req.query.query || ''));
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async checkinVipGuest(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { deviceId } = req.body;
-      if (!deviceId) {
-        throw new AppError(400, 'BAD_REQUEST', 'Thiếu deviceId trong request body.');
-      }
-
-      const guest = await prisma.vipGuest.findUnique({
-        where: { id: req.params.id },
-        select: { concertId: true },
-      });
-      if (!guest) {
-        throw new AppError(404, 'NOT_FOUND', 'Không tìm thấy khách VIP.');
-      }
-
-      await this.assertAssigned(req, guest.concertId);
-      const result = await checkinService.checkinVipGuest(req.params.id, String(deviceId), req.user!.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
-  }
-
-  public async getCheckinStats(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { concertId } = req.params;
-      if (!concertId) {
-        throw new AppError(400, 'BAD_REQUEST', 'Thiếu concertId trong path parameter.');
-      }
-
-      await this.assertAssigned(req, concertId);
-      const stats = await checkinService.getCheckinStats(concertId);
-      return res.status(200).json({ success: true, data: stats });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('stats/:concertId')
+  async getCheckinStats(@Param('concertId') concertId: string, @Res() res: Response) {
+    const result = await this.checkinService.getCheckinStats(concertId);
+    return res.status(200).json({ success: true, data: result });
   }
 }
-
-export default CheckinController;

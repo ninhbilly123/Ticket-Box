@@ -1,59 +1,82 @@
-import { Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { RolesGuard } from '../../shared/guards/roles.guard';
+import { Roles } from '../../shared/decorators/roles.decorator';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
+import { AuthUser } from '../../shared/types/auth';
 import { ArtistBioService } from './artist-bio.service';
+import { AppError } from '../../shared/lib/errors';
 
-const artistBioService = new ArtistBioService();
-
-const reviewSchema = z.object({
-  reviewedBio: z.string().min(1),
-});
-
+@Controller('api/v1/ai/artist-bio')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('ORGANIZER')
 export class ArtistBioController {
-  public async uploadPdf(req: Request, res: Response, next: NextFunction) {
-    try {
-      const artistBio = await artistBioService.uploadPdf({
-        concertId: req.params.concertId,
-        file: req.file,
-        createdBy: req.user?.id,
-        user: req.user!,
-      });
+  constructor(private readonly artistBioService: ArtistBioService) {}
 
-      return res.status(201).json({ success: true, data: artistBio });
-    } catch (err) {
-      next(err);
+  @Post('concerts/:concertId/upload')
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 10 * 1024 * 1024 }
+  }))
+  async uploadPdf(
+    @CurrentUser() user: AuthUser,
+    @Param('concertId') concertId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Res() res: Response
+  ) {
+    if (!file) {
+      throw new AppError(400, 'BAD_REQUEST', 'Vui lòng upload file PDF.');
     }
+
+    const result = await this.artistBioService.uploadPdf({
+      concertId,
+      file,
+      createdBy: user.id,
+      user,
+    });
+
+    return res.status(201).json({ success: true, data: result });
   }
 
-  public async getLatestByConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const artistBio = await artistBioService.getLatestByConcert(req.params.concertId, req.user!);
-      return res.status(200).json({ success: true, data: artistBio });
-    } catch (err) {
-      next(err);
-    }
+  @Get('concerts/:concertId')
+  async getLatestByConcert(
+    @CurrentUser() user: AuthUser,
+    @Param('concertId') concertId: string,
+    @Res() res: Response
+  ) {
+    const result = await this.artistBioService.getLatestByConcert(concertId, user);
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async reviewBio(req: Request, res: Response, next: NextFunction) {
-    try {
-      const body = reviewSchema.parse(req.body);
-      const artistBio = await artistBioService.reviewBio({
-        artistBioId: req.params.id,
-        reviewedBio: body.reviewedBio,
-        reviewedBy: req.user?.id,
-        user: req.user!,
-      });
-      return res.status(200).json({ success: true, data: artistBio });
-    } catch (err) {
-      next(err);
+  @Patch(':id/review')
+  async reviewBio(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Res() res: Response
+  ) {
+    const { reviewedContent } = body;
+    if (!reviewedContent) {
+      throw new AppError(400, 'BAD_REQUEST', 'Thiếu nội dung review.');
     }
+
+    const result = await this.artistBioService.reviewBio({
+      artistBioId: id,
+      reviewedBio: reviewedContent,
+      reviewedBy: user.id,
+      user,
+    });
+    return res.status(200).json({ success: true, data: result });
   }
 
-  public async publishBio(req: Request, res: Response, next: NextFunction) {
-    try {
-      const artistBio = await artistBioService.publishBio(req.params.id, req.user!);
-      return res.status(200).json({ success: true, data: artistBio });
-    } catch (err) {
-      next(err);
-    }
+  @Post(':id/publish')
+  async publishBio(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Res() res: Response
+  ) {
+    const result = await this.artistBioService.publishBio(id, user);
+    return res.status(200).json({ success: true, data: result });
   }
 }

@@ -1,7 +1,11 @@
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import { AuthUser } from '../../shared/types/auth';
 
+@Injectable()
 export class AuthorizationService {
+  constructor(private readonly prisma: PrismaService) {}
+
   public async canManageOrganization(user: AuthUser, organizationId: string): Promise<boolean> {
     return user.role === 'ORGANIZER' && user.organizationId === organizationId;
   }
@@ -9,7 +13,7 @@ export class AuthorizationService {
   public async canManageConcert(user: AuthUser, concertId: string): Promise<boolean> {
     if (user.role !== 'ORGANIZER' || !user.organizationId) return false;
 
-    const concert = await prisma.concert.findUnique({
+    const concert = await this.prisma.concert.findUnique({
       where: { id: concertId },
       select: { organizationId: true, organizerId: true },
     });
@@ -19,7 +23,7 @@ export class AuthorizationService {
   }
 
   public async canViewOrder(user: AuthUser, orderId: string): Promise<boolean> {
-    const order = await prisma.order.findUnique({
+    const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: {
         userId: true,
@@ -39,7 +43,7 @@ export class AuthorizationService {
   }
 
   public async canViewTicket(user: AuthUser, ticketId: string): Promise<boolean> {
-    const ticket = await prisma.ticket.findUnique({
+    const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
         userId: true,
@@ -67,7 +71,7 @@ export class AuthorizationService {
   public async canScanConcert(user: AuthUser, concertId: string, gateId?: string): Promise<boolean> {
     if (user.role !== 'CHECKIN_STAFF') return false;
 
-    const assignment = await prisma.staffAssignment.findFirst({
+    const assignment = await this.prisma.staffAssignment.findFirst({
       where: {
         staffId: user.id,
         concertId,
@@ -78,5 +82,3 @@ export class AuthorizationService {
     return Boolean(assignment);
   }
 }
-
-export const authorizationService = new AuthorizationService();

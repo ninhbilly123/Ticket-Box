@@ -1,8 +1,10 @@
+import { Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../shared/lib/prisma';
 import { AppError } from '../../shared/lib/errors';
 import { AuthUser } from '../../shared/types/auth';
-import { authorizationService } from '../rbac/authorization.service';
+import { PrismaService } from '../../shared/modules/prisma.service';
+import { AuthorizationService } from '../rbac/authorization.service';
 import { normalizeRole } from '../rbac/roles';
 import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
 import {
@@ -51,9 +53,14 @@ export interface ConcertReadinessCheck {
   blocking: boolean;
 }
 
+@Injectable()
 export class AdminService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authorizationService: AuthorizationService
+  ) {}
   public async listConcerts(user: AuthUser) {
-    return prisma.concert.findMany({
+    return this.prisma.concert.findMany({
       where: this.concertScope(user),
       include: {
         ticketTypes: { include: { inventory: true } },
@@ -67,7 +74,7 @@ export class AdminService {
 
   public async getConcert(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    return prisma.concert.findUniqueOrThrow({
+    return this.prisma.concert.findUniqueOrThrow({
       where: { id: concertId },
       include: {
         ticketTypes: { include: { inventory: true } },
@@ -94,7 +101,7 @@ export class AdminService {
     this.validateConcertSchedule(startAt, saleOpenAt, true);
     await this.assertEventCodeAvailable(input.eventCode);
 
-    const concert = await prisma.concert.create({
+    const concert = await this.prisma.concert.create({
       data: {
         organizerId: user.id,
         organizationId,
@@ -138,7 +145,7 @@ export class AdminService {
     const saleOpenAt = (data.saleOpenAt as Date | undefined) || current.saleOpenAt;
     this.validateConcertSchedule(startAt, saleOpenAt, current.status === 'DRAFT');
 
-    const concert = await prisma.concert.update({ where: { id: concertId }, data });
+    const concert = await this.prisma.concert.update({ where: { id: concertId }, data });
     await publishConcertListingInvalidation('concert.updated', { concertId });
     return concert;
   }
@@ -152,7 +159,7 @@ export class AdminService {
     if (!readiness.ready) {
       throw new AppError(409, 'CONCERT_NOT_READY', readiness.blockingIssues.join(' '));
     }
-    const updated = await prisma.concert.update({ where: { id: concertId }, data: { status: 'PUBLISHED' } });
+    const updated = await this.prisma.concert.update({ where: { id: concertId }, data: { status: 'PUBLISHED' } });
     await publishConcertListingInvalidation('concert.published', { concertId });
     return updated;
   }
@@ -164,25 +171,25 @@ export class AdminService {
 
   public async listConcertArtists(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    const relations = await prisma.concertArtist.findMany({
+    const relations = await this.prisma.concertArtist.findMany({
       where: { concertId },
       include: { artist: true },
       orderBy: { artist: { name: 'asc' } },
     });
-    return relations.map((relation) => relation.artist);
+    return relations.map((relation: any) => relation.artist);
   }
 
   public async addConcertArtist(user: AuthUser, concertId: string, artistName: string) {
     const concert = await this.assertCanManageConcert(user, concertId);
     this.assertDraft(concert.status);
     const name = artistName.trim();
-    let artist = await prisma.artist.findFirst({
+    let artist = await this.prisma.artist.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
     });
     if (!artist) {
-      artist = await prisma.artist.create({ data: { name } });
+      artist = await this.prisma.artist.create({ data: { name } });
     }
-    await prisma.concertArtist.upsert({
+    await this.prisma.concertArtist.upsert({
       where: { concertId_artistId: { concertId, artistId: artist.id } },
       create: { concertId, artistId: artist.id },
       update: {},
@@ -194,11 +201,11 @@ export class AdminService {
   public async removeConcertArtist(user: AuthUser, concertId: string, artistId: string) {
     const concert = await this.assertCanManageConcert(user, concertId);
     this.assertDraft(concert.status);
-    const relation = await prisma.concertArtist.findUnique({
+    const relation = await this.prisma.concertArtist.findUnique({
       where: { concertId_artistId: { concertId, artistId } },
     });
     if (!relation) throw new AppError(404, 'CONCERT_ARTIST_NOT_FOUND', 'Nghệ sĩ không thuộc concert này.');
-    await prisma.concertArtist.delete({ where: { concertId_artistId: { concertId, artistId } } });
+    await this.prisma.concertArtist.delete({ where: { concertId_artistId: { concertId, artistId } } });
     await publishConcertListingInvalidation('concert.updated', { concertId });
     return { deleted: true };
   }
@@ -209,7 +216,7 @@ export class AdminService {
     if (!file.originalname.toLowerCase().endsWith('.svg') && file.mimetype !== 'image/svg+xml') {
       throw new AppError(400, 'SEAT_MAP_FILE_TYPE_INVALID', 'Chỉ chấp nhận file SVG.');
     }
-    const ticketTypes = await prisma.ticketType.findMany({
+    const ticketTypes = await this.prisma.ticketType.findMany({
       where: { concertId, status: 'ACTIVE' },
       select: { zoneCode: true },
     });
@@ -218,9 +225,9 @@ export class AdminService {
     }
     const inspected = sanitizeAndValidateSeatMapSvg(
       file.buffer.toString('utf8'),
-      ticketTypes.map((ticketType) => ticketType.zoneCode)
+      ticketTypes.map((ticketType: any) => ticketType.zoneCode)
     );
-    const updated = await prisma.concert.update({
+    const updated = await this.prisma.concert.update({
       where: { id: concertId },
       data: { svgSeatingMap: inspected.svg },
     });
@@ -231,7 +238,7 @@ export class AdminService {
   public async deleteSeatMap(user: AuthUser, concertId: string) {
     const concert = await this.assertCanManageConcert(user, concertId);
     this.assertDraft(concert.status);
-    const updated = await prisma.concert.update({
+    const updated = await this.prisma.concert.update({
       where: { id: concertId },
       data: { svgSeatingMap: null },
     });
@@ -244,7 +251,7 @@ export class AdminService {
     if (!['DRAFT', 'PUBLISHED', 'ON_SALE', 'SALE_CLOSED'].includes(concert.status)) {
       throw new AppError(409, 'CONCERT_INVALID_STATUS_TRANSITION', 'Concert không thể hủy từ trạng thái hiện tại.');
     }
-    const updated = await prisma.concert.update({
+    const updated = await this.prisma.concert.update({
       where: { id: concertId },
       data: {
         status: 'CANCELLED',
@@ -258,7 +265,7 @@ export class AdminService {
 
   public async listTicketTypes(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    return prisma.ticketType.findMany({
+    return this.prisma.ticketType.findMany({
       where: { concertId },
       include: { inventory: true },
       orderBy: { price: 'desc' },
@@ -272,7 +279,7 @@ export class AdminService {
     this.validateTicketTypeInput(input, concert);
     await this.assertTicketTypeIdentityAvailable(concertId, input.name, zoneCode);
 
-    const ticketType = await prisma.$transaction(async (tx) => {
+    const ticketType = await this.prisma.$transaction(async (tx: any) => {
       const ticketType = await tx.ticketType.create({
         data: {
           concertId,
@@ -305,7 +312,7 @@ export class AdminService {
   }
 
   public async updateTicketType(user: AuthUser, ticketTypeId: string, input: TicketTypeUpdateInput) {
-    const ticketType = await prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
+    const ticketType = await this.prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
     if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
     const concert = await this.assertCanManageConcert(user, ticketType.concertId);
     this.assertDraft(concert.status);
@@ -338,7 +345,7 @@ export class AdminService {
       ticketTypeId
     );
 
-    const updated = await prisma.ticketType.update({ where: { id: ticketTypeId }, data });
+    const updated = await this.prisma.ticketType.update({ where: { id: ticketTypeId }, data });
     await publishConcertListingInvalidation('ticket-type.updated', {
       concertId: ticketType.concertId,
       ticketTypeId,
@@ -347,19 +354,19 @@ export class AdminService {
   }
 
   public async deleteTicketType(user: AuthUser, ticketTypeId: string) {
-    const ticketType = await prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
+    const ticketType = await this.prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
     if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
     const concert = await this.assertCanManageConcert(user, ticketType.concertId);
     this.assertDraft(concert.status);
 
-    const soldOrReserved = await prisma.ticket.count({
+    const soldOrReserved = await this.prisma.ticket.count({
       where: { orderItem: { ticketTypeId } },
     });
     if (soldOrReserved > 0) {
       throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'Ticket type already has issued tickets.');
     }
 
-    await prisma.ticketType.delete({ where: { id: ticketTypeId } });
+    await this.prisma.ticketType.delete({ where: { id: ticketTypeId } });
     await publishConcertListingInvalidation('ticket-type.updated', {
       concertId: ticketType.concertId,
       ticketTypeId,
@@ -368,7 +375,7 @@ export class AdminService {
   }
 
   public async getInventory(user: AuthUser, ticketTypeId: string) {
-    const ticketType = await prisma.ticketType.findUnique({
+    const ticketType = await this.prisma.ticketType.findUnique({
       where: { id: ticketTypeId },
       include: { inventory: true },
     });
@@ -378,7 +385,7 @@ export class AdminService {
   }
 
   public async updateInventory(user: AuthUser, ticketTypeId: string, totalQuantity: number) {
-    const ticketType = await prisma.ticketType.findUnique({
+    const ticketType = await this.prisma.ticketType.findUnique({
       where: { id: ticketTypeId },
       include: { inventory: true },
     });
@@ -391,7 +398,7 @@ export class AdminService {
       throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'New total quantity cannot be less than sold plus reserved quantity.');
     }
 
-    const inventory = await prisma.$transaction(async (tx) => {
+    const inventory = await this.prisma.$transaction(async (tx: any) => {
       await tx.ticketType.update({
         where: { id: ticketTypeId },
         data: {
@@ -427,7 +434,7 @@ export class AdminService {
 
   public async listStaffAssignments(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    return prisma.staffAssignment.findMany({
+    return this.prisma.staffAssignment.findMany({
       where: { concertId },
       include: { staff: { select: { id: true, email: true, fullName: true, role: true } } },
       orderBy: { createdAt: 'desc' },
@@ -436,7 +443,7 @@ export class AdminService {
 
   public async createStaffAssignment(user: AuthUser, concertId: string, staffId: string, gateId: string) {
     await this.assertCanManageConcert(user, concertId);
-    const staff = await prisma.user.findUnique({ where: { id: staffId } });
+    const staff = await this.prisma.user.findUnique({ where: { id: staffId } });
     if (!staff || normalizeRole(staff.role) !== 'CHECKIN_STAFF') {
       throw new AppError(403, 'FORBIDDEN_ROLE', 'Assigned user must have CHECKIN_STAFF role.');
     }
@@ -444,7 +451,7 @@ export class AdminService {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot assign staff outside your organization.');
     }
 
-    return prisma.staffAssignment.upsert({
+    return this.prisma.staffAssignment.upsert({
       where: { staffId_concertId_gateId: { staffId, concertId, gateId } },
       create: { staffId, concertId, gateId, createdBy: user.id },
       update: { createdBy: user.id },
@@ -452,17 +459,17 @@ export class AdminService {
   }
 
   public async deleteStaffAssignment(user: AuthUser, assignmentId: string) {
-    const assignment = await prisma.staffAssignment.findUnique({ where: { id: assignmentId } });
+    const assignment = await this.prisma.staffAssignment.findUnique({ where: { id: assignmentId } });
     if (!assignment) throw new AppError(404, 'STAFF_ASSIGNMENT_NOT_FOUND', 'Staff assignment not found.');
     await this.assertCanManageConcert(user, assignment.concertId);
-    await prisma.staffAssignment.delete({ where: { id: assignmentId } });
+    await this.prisma.staffAssignment.delete({ where: { id: assignmentId } });
     return { deleted: true };
   }
 
   public async listWhitelistConfigs(user: AuthUser) {
     const organizationId = this.resolveWritableOrganization(user);
 
-    return prisma.whitelistEmailConfig.findMany({
+    return this.prisma.whitelistEmailConfig.findMany({
       where: { organizationId },
       include: { concert: { select: { id: true, name: true } }, organization: true },
       orderBy: { createdAt: 'desc' },
@@ -470,7 +477,7 @@ export class AdminService {
   }
 
   public async listActiveWhitelistConfigs() {
-    return prisma.whitelistEmailConfig.findMany({
+    return this.prisma.whitelistEmailConfig.findMany({
       where: { status: 'ACTIVE' },
       include: { concert: { select: { id: true, name: true } }, organization: true },
       orderBy: { createdAt: 'desc' },
@@ -494,7 +501,7 @@ export class AdminService {
       throw new AppError(400, 'WHITELIST_CONFIG_INVALID', 'Mailbox and sender email must be valid email-like values.');
     }
 
-    return prisma.whitelistEmailConfig.create({
+    return this.prisma.whitelistEmailConfig.create({
       data: {
         organizationId,
         concertId: input.concertId,
@@ -507,30 +514,30 @@ export class AdminService {
   }
 
   public async updateWhitelistConfig(user: AuthUser, configId: string, input: Record<string, unknown>) {
-    const config = await prisma.whitelistEmailConfig.findUnique({ where: { id: configId } });
+    const config = await this.prisma.whitelistEmailConfig.findUnique({ where: { id: configId } });
     if (!config) throw new AppError(404, 'WHITELIST_CONFIG_NOT_FOUND', 'Whitelist config not found.');
-    const canManage = await authorizationService.canManageOrganization(user, config.organizationId);
+    const canManage = await this.authorizationService.canManageOrganization(user, config.organizationId);
     if (!canManage) throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage this whitelist config.');
 
     const data: Record<string, unknown> = {};
     for (const field of ['mailboxAddress', 'allowedSenderEmail', 'subjectKeyword', 'status'] as const) {
       if (typeof input[field] === 'string') data[field] = input[field];
     }
-    return prisma.whitelistEmailConfig.update({ where: { id: configId }, data });
+    return this.prisma.whitelistEmailConfig.update({ where: { id: configId }, data });
   }
 
   public async deleteWhitelistConfig(user: AuthUser, configId: string) {
-    const config = await prisma.whitelistEmailConfig.findUnique({ where: { id: configId } });
+    const config = await this.prisma.whitelistEmailConfig.findUnique({ where: { id: configId } });
     if (!config) throw new AppError(404, 'WHITELIST_CONFIG_NOT_FOUND', 'Whitelist config not found.');
-    const canManage = await authorizationService.canManageOrganization(user, config.organizationId);
+    const canManage = await this.authorizationService.canManageOrganization(user, config.organizationId);
     if (!canManage) throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage this whitelist config.');
-    await prisma.whitelistEmailConfig.delete({ where: { id: configId } });
+    await this.prisma.whitelistEmailConfig.delete({ where: { id: configId } });
     return { deleted: true };
   }
 
   public async revenueSummary(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
-    const paidOrders = await prisma.order.findMany({
+    const paidOrders = await this.prisma.order.findMany({
       where: { concertId, status: { in: PAID_STATUSES } },
       include: {
         orderItems: { include: { ticketType: true, tickets: true } },
@@ -566,7 +573,7 @@ export class AdminService {
       throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ORGANIZER can list check-in staff.');
     }
 
-    return prisma.user.findMany({
+    return this.prisma.user.findMany({
       where: {
         organizationId: user.organizationId,
         role: 'CHECKIN_STAFF',
@@ -594,13 +601,13 @@ export class AdminService {
   }) {
     const organizationId = this.resolveWritableOrganization(user);
     const email = input.email.toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new AppError(400, 'AUTH_EMAIL_EXISTS', 'Email is already registered.');
     }
 
     const passwordHash = await bcrypt.hash(input.password, 10);
-    return prisma.user.create({
+    return this.prisma.user.create({
       data: {
         email,
         passwordHash,
@@ -639,10 +646,10 @@ export class AdminService {
   }
 
   private async assertCanManageConcert(user: AuthUser, concertId: string) {
-    const concert = await prisma.concert.findUnique({ where: { id: concertId } });
+    const concert = await this.prisma.concert.findUnique({ where: { id: concertId } });
     if (!concert) throw new AppError(404, 'CONCERT_NOT_FOUND', 'Concert not found.');
 
-    const canManage = await authorizationService.canManageConcert(user, concertId);
+    const canManage = await this.authorizationService.canManageConcert(user, concertId);
     if (!canManage) {
       throw new AppError(403, 'FORBIDDEN_RESOURCE', 'You do not have permission to manage this concert.');
     }
@@ -660,7 +667,7 @@ export class AdminService {
   }
 
   private async evaluateConcertReadiness(concertId: string) {
-    const concert = await prisma.concert.findUnique({
+    const concert = await this.prisma.concert.findUnique({
       where: { id: concertId },
       include: {
         ticketTypes: { include: { inventory: true } },
@@ -714,7 +721,7 @@ export class AdminService {
       'Cần gắn ít nhất một nghệ sĩ.'
     );
 
-    const activeTicketTypes = concert.ticketTypes.filter((ticketType) => ticketType.status === 'ACTIVE');
+    const activeTicketTypes = concert.ticketTypes.filter((ticketType: any) => ticketType.status === 'ACTIVE');
     const invalidTicketTypes: string[] = [];
     for (const ticketType of activeTicketTypes) {
       const totalQuantity = ticketType.inventory?.totalQuantity ?? ticketType.totalQuantity;
@@ -738,8 +745,8 @@ export class AdminService {
         : invalidTicketTypes.join('; ')
     );
 
-    const zoneCodes = activeTicketTypes.map((ticketType) => ticketType.zoneCode);
-    const normalizedZoneCodes = zoneCodes.map((code) => assertZoneCode(code));
+    const zoneCodes = activeTicketTypes.map((ticketType: any) => ticketType.zoneCode);
+    const normalizedZoneCodes = zoneCodes.map((code: any) => assertZoneCode(code));
     addCheck(
       'zone-codes',
       'Mã khu vực',
@@ -832,7 +839,7 @@ export class AdminService {
   }
 
   private async assertEventCodeAvailable(eventCode: string, excludeConcertId?: string) {
-    const existing = await prisma.concert.findFirst({
+    const existing = await this.prisma.concert.findFirst({
       where: {
         eventCode: eventCode.trim().toUpperCase(),
         ...(excludeConcertId ? { id: { not: excludeConcertId } } : {}),
@@ -850,7 +857,7 @@ export class AdminService {
     zoneCode: string,
     excludeTicketTypeId?: string
   ) {
-    const existing = await prisma.ticketType.findFirst({
+    const existing = await this.prisma.ticketType.findFirst({
       where: {
         concertId,
         ...(excludeTicketTypeId ? { id: { not: excludeTicketTypeId } } : {}),
@@ -892,4 +899,4 @@ export class AdminService {
   }
 }
 
-export const adminService = new AdminService();
+

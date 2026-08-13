@@ -1,7 +1,15 @@
-import { NextFunction, Request, Response } from 'express';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, UseInterceptors, UploadedFile, Req, Res } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import multer from 'multer';
 import { z } from 'zod';
-import { adminService } from './admin.service';
+import { AdminService } from './admin.service';
 import { AppError } from '../../shared/lib/errors';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { RolesGuard } from '../../shared/guards/roles.guard';
+import { Roles } from '../../shared/decorators/roles.decorator';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
+import { AuthUser } from '../../shared/types/auth';
+import { MAX_SEAT_MAP_SIZE } from '../../shared/lib/seat-map-svg';
 
 const isoDateTime = z.string().datetime({ offset: true });
 const zoneCode = z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -82,277 +90,205 @@ const whitelistSchema = z.object({
   status: z.string().optional(),
 });
 
+
+@Controller('api/v1/admin')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('ORGANIZER')
 export class AdminController {
-  public async listConcerts(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listConcerts(req.user!);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  constructor(private readonly adminService: AdminService) {}
+
+  @Get('concerts')
+  public async listConcerts(@CurrentUser() user: AuthUser) {
+    const result = await this.adminService.listConcerts(user);
+    return { success: true, data: result };
   }
 
-  public async getConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.getConcert(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:id')
+  public async getConcert(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.getConcert(user, id);
+    return { success: true, data: result };
   }
 
-  public async createConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = concertCreateSchema.parse(req.body);
-      const result = await adminService.createConcert(req.user!, dto);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts')
+  public async createConcert(@CurrentUser() user: AuthUser, @Body() body: any) {
+    const dto = concertCreateSchema.parse(body);
+    const result = await this.adminService.createConcert(user, dto);
+    return { success: true, data: result };
   }
 
-  public async updateConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = concertUpdateSchema.parse(req.body);
-      const result = await adminService.updateConcert(req.user!, req.params.id, dto);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Patch('concerts/:id')
+  public async updateConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const dto = concertUpdateSchema.parse(body);
+    const result = await this.adminService.updateConcert(user, id, dto);
+    return { success: true, data: result };
   }
 
-  public async publishConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.publishConcert(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts/:id/publish')
+  public async publishConcert(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.publishConcert(user, id);
+    return { success: true, data: result };
   }
 
-  public async getConcertReadiness(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.getConcertReadiness(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:id/readiness')
+  public async getConcertReadiness(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.getConcertReadiness(user, id);
+    return { success: true, data: result };
   }
 
-  public async listConcertArtists(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listConcertArtists(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:id/artists')
+  public async listConcertArtists(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.listConcertArtists(user, id);
+    return { success: true, data: result };
   }
 
-  public async addConcertArtist(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = artistSchema.parse(req.body);
-      const result = await adminService.addConcertArtist(req.user!, req.params.id, dto.name);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts/:id/artists')
+  public async addConcertArtist(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const dto = artistSchema.parse(body);
+    const result = await this.adminService.addConcertArtist(user, id, dto.name);
+    return { success: true, data: result };
   }
 
-  public async removeConcertArtist(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.removeConcertArtist(req.user!, req.params.id, req.params.artistId);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Delete('concerts/:id/artists/:artistId')
+  public async removeConcertArtist(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('artistId') artistId: string) {
+    const result = await this.adminService.removeConcertArtist(user, id, artistId);
+    return { success: true, data: result };
   }
 
-  public async uploadSeatMap(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.file) {
-        throw new AppError(400, 'SEAT_MAP_FILE_REQUIRED', 'Vui lòng chọn file SVG.');
-      }
-      const result = await adminService.uploadSeatMap(req.user!, req.params.id, req.file);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
+  @Post('concerts/:id/seat-map')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_SEAT_MAP_SIZE },
+    fileFilter: (_req: any, file: any, callback: any) => {
+      const isSvg = file.mimetype === 'image/svg+xml' || file.originalname.toLowerCase().endsWith('.svg');
+      if (isSvg) { callback(null, true); return; }
+      callback(new AppError(400, 'SEAT_MAP_FILE_TYPE_INVALID', 'Chỉ chấp nhận file SVG.'));
+    },
+  }))
+  public async uploadSeatMap(@CurrentUser() user: AuthUser, @Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new AppError(400, 'SEAT_MAP_FILE_REQUIRED', 'Vui lòng chọn file SVG.');
     }
+    const result = await this.adminService.uploadSeatMap(user, id, file);
+    return { success: true, data: result };
   }
 
-  public async deleteSeatMap(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.deleteSeatMap(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Delete('concerts/:id/seat-map')
+  public async deleteSeatMap(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.deleteSeatMap(user, id);
+    return { success: true, data: result };
   }
 
-  public async cancelConcert(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.cancelConcert(req.user!, req.params.id, req.body?.reason);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts/:id/cancel')
+  public async cancelConcert(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const result = await this.adminService.cancelConcert(user, id, body?.reason);
+    return { success: true, data: result };
   }
 
-  public async listTicketTypes(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listTicketTypes(req.user!, req.params.concertId);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:concertId/ticket-types')
+  public async listTicketTypes(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string) {
+    const result = await this.adminService.listTicketTypes(user, concertId);
+    return { success: true, data: result };
   }
 
-  public async createTicketType(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = ticketTypeSchema.parse(req.body);
-      const result = await adminService.createTicketType(req.user!, req.params.concertId, dto);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts/:concertId/ticket-types')
+  public async createTicketType(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: any) {
+    const dto = ticketTypeSchema.parse(body);
+    const result = await this.adminService.createTicketType(user, concertId, dto);
+    return { success: true, data: result };
   }
 
-  public async updateTicketType(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = ticketTypeUpdateSchema.parse(req.body);
-      const result = await adminService.updateTicketType(req.user!, req.params.id, dto);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Patch('ticket-types/:id')
+  public async updateTicketType(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const dto = ticketTypeUpdateSchema.parse(body);
+    const result = await this.adminService.updateTicketType(user, id, dto);
+    return { success: true, data: result };
   }
 
-  public async deleteTicketType(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.deleteTicketType(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Delete('ticket-types/:id')
+  public async deleteTicketType(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.deleteTicketType(user, id);
+    return { success: true, data: result };
   }
 
-  public async getInventory(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.getInventory(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('ticket-types/:id/inventory')
+  public async getInventory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.getInventory(user, id);
+    return { success: true, data: result };
   }
 
-  public async updateInventory(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = inventorySchema.parse(req.body);
-      const result = await adminService.updateInventory(req.user!, req.params.id, dto.totalQuantity);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Patch('ticket-types/:id/inventory')
+  public async updateInventory(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const dto = inventorySchema.parse(body);
+    const result = await this.adminService.updateInventory(user, id, dto.totalQuantity);
+    return { success: true, data: result };
   }
 
-  public async listStaffAssignments(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listStaffAssignments(req.user!, req.params.concertId);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:concertId/staff-assignments')
+  public async listStaffAssignments(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string) {
+    const result = await this.adminService.listStaffAssignments(user, concertId);
+    return { success: true, data: result };
   }
 
-  public async createStaffAssignment(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = staffAssignmentSchema.parse(req.body);
-      const result = await adminService.createStaffAssignment(req.user!, req.params.concertId, dto.staffId, dto.gateId);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('concerts/:concertId/staff-assignments')
+  public async createStaffAssignment(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: any) {
+    const dto = staffAssignmentSchema.parse(body);
+    const result = await this.adminService.createStaffAssignment(user, concertId, dto.staffId, dto.gateId);
+    return { success: true, data: result };
   }
 
-  public async deleteStaffAssignment(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.deleteStaffAssignment(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Delete('staff-assignments/:id')
+  public async deleteStaffAssignment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.deleteStaffAssignment(user, id);
+    return { success: true, data: result };
   }
 
-  public async listWhitelistConfigs(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listWhitelistConfigs(req.user!);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('whitelist-email-configs')
+  public async listWhitelistConfigs(@CurrentUser() user: AuthUser) {
+    const result = await this.adminService.listWhitelistConfigs(user);
+    return { success: true, data: result };
   }
 
-  public async listActiveWhitelistConfigs(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listActiveWhitelistConfigs();
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('whitelist-email-configs')
+  public async createWhitelistConfig(@CurrentUser() user: AuthUser, @Body() body: any) {
+    const dto = whitelistSchema.parse(body);
+    const result = await this.adminService.createWhitelistConfig(user, dto);
+    return { success: true, data: result };
   }
 
-  public async createWhitelistConfig(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = whitelistSchema.parse(req.body);
-      const result = await adminService.createWhitelistConfig(req.user!, dto);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Patch('whitelist-email-configs/:id')
+  public async updateWhitelistConfig(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: any) {
+    const result = await this.adminService.updateWhitelistConfig(user, id, body);
+    return { success: true, data: result };
   }
 
-  public async updateWhitelistConfig(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.updateWhitelistConfig(req.user!, req.params.id, req.body);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Delete('whitelist-email-configs/:id')
+  public async deleteWhitelistConfig(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.deleteWhitelistConfig(user, id);
+    return { success: true, data: result };
   }
 
-  public async deleteWhitelistConfig(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.deleteWhitelistConfig(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:id/revenue-summary')
+  public async revenueSummary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.revenueSummary(user, id);
+    return { success: true, data: result };
   }
 
-  public async revenueSummary(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.revenueSummary(req.user!, req.params.id);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('concerts/:id/sales-stats')
+  public async salesStats(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const result = await this.adminService.revenueSummary(user, id);
+    return { success: true, data: result };
   }
 
-  public async listStaffUsers(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await adminService.listStaffUsers(req.user!);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('staff')
+  public async listStaffUsers(@CurrentUser() user: AuthUser) {
+    const result = await this.adminService.listStaffUsers(user);
+    return { success: true, data: result };
   }
 
-  public async createStaffUser(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = staffCreateSchema.parse(req.body);
-      const result = await adminService.createStaffUser(req.user!, dto);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('staff')
+  public async createStaffUser(@CurrentUser() user: AuthUser, @Body() body: any) {
+    const dto = staffCreateSchema.parse(body);
+    const result = await this.adminService.createStaffUser(user, dto);
+    return { success: true, data: result };
   }
 }

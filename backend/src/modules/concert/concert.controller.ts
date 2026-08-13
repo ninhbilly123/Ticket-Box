@@ -1,92 +1,81 @@
-import { Request, Response, NextFunction } from 'express';
+import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common';
 import { ConcertService } from './concert.service';
-import { waitingRoomService } from './waiting-room.service';
-import { AppError } from '../../shared/lib/errors';
+import { WaitingRoomService } from './waiting-room.service';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
 
-const concertService = new ConcertService();
-
+@Controller('api/v1/concerts')
 export class ConcertController {
-  public async getConcerts(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { search, artist, date, location } = req.query;
+  constructor(
+    private readonly concertService: ConcertService,
+    private readonly waitingRoomService: WaitingRoomService
+  ) {}
 
-      const concerts = await concertService.getConcerts({
-        search: search ? String(search) : undefined,
-        artist: artist ? String(artist) : undefined,
-        date: date ? String(date) : undefined,
-        location: location ? String(location) : undefined,
-      });
+  @Get()
+  public async getConcerts(
+    @Query('search') search?: string,
+    @Query('artist') artist?: string,
+    @Query('date') date?: string,
+    @Query('location') location?: string,
+  ) {
+    const concerts = await this.concertService.getConcerts({
+      search,
+      artist,
+      date,
+      location,
+    });
 
-      return res.status(200).json({
-        success: true,
-        data: concerts,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return {
+      success: true,
+      data: concerts,
+    };
   }
 
-  public async getConcertById(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      const concert = await concertService.getConcertById(id);
+  @Get(':id/availability')
+  public async getConcertAvailability(@Param('id') id: string) {
+    const availability = await this.concertService.getConcertAvailability(id);
 
-      return res.status(200).json({
-        success: true,
-        data: concert,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return {
+      success: true,
+      data: availability,
+    };
   }
 
-  public async getConcertAvailability(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      const availability = await concertService.getConcertAvailability(id);
+  @Post(':concertId/waiting-room/join')
+  @UseGuards(AuthGuard)
+  public async joinWaitingRoom(
+    @Param('concertId') concertId: string,
+    @CurrentUser() user: any,
+  ) {
+    const status = await this.waitingRoomService.join(concertId, user.id);
 
-      return res.status(200).json({
-        success: true,
-        data: availability,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return {
+      success: true,
+      data: status,
+    };
   }
 
-  public async joinWaitingRoom(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) {
-        throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
-      }
+  @Get(':concertId/waiting-room/status')
+  @UseGuards(AuthGuard)
+  public async getWaitingRoomStatus(
+    @Param('concertId') concertId: string,
+    @CurrentUser() user: any,
+  ) {
+    const status = await this.waitingRoomService.getStatus(concertId, user.id);
 
-      const { concertId } = req.params;
-      const status = await waitingRoomService.join(concertId, req.user.id);
-
-      return res.status(200).json({
-        success: true,
-        data: status,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return {
+      success: true,
+      data: status,
+    };
   }
 
-  public async getWaitingRoomStatus(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!req.user) {
-        throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
-      }
+  @Get(':id')
+  public async getConcertById(@Param('id') id: string) {
+    const concert = await this.concertService.getConcertById(id);
 
-      const { concertId } = req.params;
-      const status = await waitingRoomService.getStatus(concertId, req.user.id);
-
-      return res.status(200).json({
-        success: true,
-        data: status,
-      });
-    } catch (err) {
-      next(err);
-    }
+    return {
+      success: true,
+      data: concert,
+    };
   }
 }

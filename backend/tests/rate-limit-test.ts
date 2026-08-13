@@ -1,4 +1,6 @@
-import app from '../src/app';
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/app.module';
 import { prisma } from '../src/shared/lib/prisma';
 import jwt from 'jsonwebtoken';
 import http from 'http';
@@ -55,10 +57,11 @@ async function main() {
     { expiresIn: '1h' }
   );
 
-  // 2. Khởi chạy Express Server động
+  // 2. Khởi chạy API Server động
   console.log('2. Khởi chạy API Server trên cổng ngẫu nhiên...');
-  const server = app.listen(0);
-  const address = server.address();
+  const app = await NestFactory.create(AppModule, { logger: false });
+  await app.listen(0);
+  const address = app.getHttpServer().address();
   if (!address || typeof address !== 'object') {
     throw new Error('Failed to bind server port');
   }
@@ -99,7 +102,7 @@ async function main() {
 
   // 5. Dọn dẹp dữ liệu
   console.log('\n5. Đang dọn dẹp dữ liệu test...');
-  server.close();
+  await app.close();
   await prisma.user.delete({ where: { id: user.id } });
   console.log('=== Dọn dẹp thành công! ===');
 

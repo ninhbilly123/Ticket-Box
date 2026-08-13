@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
-import { prisma } from '../../shared/lib/prisma';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
@@ -48,7 +49,17 @@ function stringifyParams(obj: any): string {
     .join('&');
 }
 
+function timingSafeStringEqual(left?: string, right?: string): boolean {
+  if (!left || !right) return false;
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+@Injectable()
 export class PaymentService {
+  constructor(private readonly prisma: PrismaService) {}
   /**
    * Helper to check Circuit Breaker state on Redis
    */
@@ -125,7 +136,7 @@ export class PaymentService {
       throw new AppError(400, 'GATEWAY_DISABLED', 'Cổng thanh toán MoMo tạm thời bị vô hiệu hóa. Vui lòng sử dụng VNPAY.');
     }
 
-    const order = await prisma.order.findUnique({
+    const order = await this.prisma.order.findUnique({
       where: { id: orderId },
     });
 
@@ -160,7 +171,7 @@ export class PaymentService {
     await this.recordSuccess(gateway);
 
     // 2. Create the Payment record in Database
-    const payment = await prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         orderId: order.id,
         paymentGateway: 'vnpay',
@@ -223,7 +234,7 @@ export class PaymentService {
     const hmac = crypto.createHmac('sha512', secretKey);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-    if (secureHash !== signed) {
+    if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
       console.error('[VNPAY IPN] Signature validation failed.');
       return { RspCode: '97', Message: 'Signature failure' };
     }
@@ -234,7 +245,7 @@ export class PaymentService {
     const transactionNo = vnpParams['vnp_TransactionNo'];
 
     // 2. Fetch payment record
-    const payment = await prisma.payment.findUnique({
+    const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
     });
 
@@ -287,7 +298,7 @@ export class PaymentService {
     const hmac = crypto.createHmac('sha512', secretKey);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-    if (secureHash !== signed) {
+    if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
       console.error('[VNPAY Return] Signature validation failed.');
       return { success: false, message: 'Signature failure' };
     }
@@ -297,7 +308,7 @@ export class PaymentService {
     const transactionNo = vnpParams['vnp_TransactionNo'];
 
     // 2. Fetch payment record
-    const payment = await prisma.payment.findUnique({
+    const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
     });
 
@@ -316,7 +327,7 @@ export class PaymentService {
     }
 
     // 4. Retrieve latest status
-    const updatedPayment = await prisma.payment.findUnique({
+    const updatedPayment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: { order: true },
     });
@@ -337,7 +348,7 @@ export class PaymentService {
     transactionId?: string,
     responseCode?: string
   ) {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Get payment record
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
@@ -572,5 +583,60 @@ export class PaymentService {
     }
 
     return result;
+  }
+
+  public async createPayment(params: {
+    userId: string;
+    orderId: string;
+    gateway: string;
+    ipAddress: string;
+  }) {
+    const returnUrl = process.env.VNPAY_RETURN_URL || 'http://localhost:3000/api/v1/payments/vnpay-return';
+    return this.createPaymentUrl({
+      userId: params.userId,
+      orderId: params.orderId,
+      gateway: params.gateway as any,
+      returnUrl,
+      ipAddr: params.ipAddress,
+    });
+  }
+
+  public async handleVNPAYIpn(query: any) {
+    const res = await this.processVNPAYIpn(query);
+    return { code: res.RspCode, message: res.Message };
+  }
+
+  public async handleVNPAYReturn(query: any) {
+    const result = await this.processVNPAYReturn(query);
+    const statusText = result.success ? 'Thanh toán thành công' : 'Thanh toán thất bại';
+    return `<!DOCTYPE html><html><head><title>Kết quả thanh toán</title></head><body><h1>${statusText}</h1><p>Mã đơn hàng: ${result.payment?.orderId || ''}</p></body></html>`;
+  }
+
+  public async renderMockCheckout(query: any) {
+    if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
+      throw new AppError(404, 'MOCK_PAYMENT_DISABLED', 'Mock payment checkout is disabled.');
+    }
+    return `<!DOCTYPE html><html><head><title>Mock Checkout</title></head><body><h1>Mock Payment Gateway</h1></body></html>`;
+  }
+
+  public async handleWebhook(body: any, providedSecret?: string) {
+    if (process.env.ENABLE_MOCK_PAYMENT_WEBHOOK !== 'true') {
+      throw new AppError(404, 'MOCK_PAYMENT_DISABLED', 'Mock payment webhook is disabled.');
+    }
+
+    const expectedSecret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET;
+    if (!expectedSecret || expectedSecret.length < 32) {
+      throw new AppError(500, 'MOCK_PAYMENT_WEBHOOK_SECRET_MISSING', 'Mock payment webhook secret is not configured.');
+    }
+
+    if (!timingSafeStringEqual(providedSecret, expectedSecret)) {
+      throw new AppError(401, 'MOCK_PAYMENT_WEBHOOK_UNAUTHORIZED', 'Invalid mock payment webhook secret.');
+    }
+
+    const { paymentId, status } = body;
+    if (paymentId && (status === 'SUCCESS' || status === 'FAILED')) {
+      return this.processPaymentStatusUpdate(paymentId, status);
+    }
+    return { message: 'Webhook received' };
   }
 }

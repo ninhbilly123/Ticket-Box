@@ -7,7 +7,8 @@ const getApiBaseUrl = () => {
     // Client-side: tự động lấy IP/hostname của máy tính chạy backend
     const hostname = window.location.hostname;
     const apiHost = hostname === 'localhost' || hostname === '::1' ? '127.0.0.1' : hostname;
-    return `http://${apiHost}:3000/api/v1`;
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${apiHost}:3000/api/v1`;
   }
 
   // Server-side (Next.js SSR/build)

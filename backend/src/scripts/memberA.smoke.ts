@@ -1,4 +1,6 @@
-import app from '../app';
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../app.module';
 import { prisma } from '../shared/lib/prisma';
 import redisClient from '../shared/lib/redis';
 
@@ -51,8 +53,9 @@ async function login(baseUrl: string, email: string) {
 }
 
 async function main() {
-  const server = app.listen(0);
-  const address = server.address();
+  const app = await NestFactory.create(AppModule, { logger: false });
+  await app.listen(0);
+  const address = app.getHttpServer().address();
   assert(address && typeof address === 'object', 'Failed to bind smoke test server');
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
@@ -135,7 +138,9 @@ async function main() {
     await prisma.staffAssignment.delete({ where: { id: createdAssignment.body.data!.id } });
     await prisma.user.delete({ where: { id: createdStaff.body.data!.id } });
 
-    const activeWhitelist = await request(baseUrl, '/api/v1/internal/whitelist-email-configs/active');
+    const activeWhitelist = await request(baseUrl, '/api/v1/internal/whitelist-email-configs/active', {
+      token: organizer.accessToken,
+    });
     assert(activeWhitelist.status === 200, 'Internal active whitelist API should work');
 
     const orgB = await prisma.organization.create({ data: { name: 'Other Organizer' } });
@@ -185,9 +190,7 @@ async function main() {
 
     console.log('Member A smoke test passed.');
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
+    await app.close();
     await prisma.$disconnect();
     if (redisClient.isOpen) {
       await redisClient.quit();

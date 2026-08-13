@@ -1,12 +1,13 @@
 {
   "name": "ticketbox-backend",
   "version": "1.0.0",
-  "description": "TicketBox Express Backend API",
-  "main": "src/app.ts",
+  "description": "TicketBox NestJS Backend API",
+  "main": "dist/main.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
-    "build": "tsc",
-    "start": "node dist/app.js",
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:debug": "nest start --debug --watch",
     "test:member-a": "ts-node --files src/scripts/memberA.smoke.ts",
     "test:concurrency": "ts-node --files tests/concurrency-test.ts",
     "test:user-limit": "ts-node --files tests/user-limit-test.ts",
@@ -18,7 +19,8 @@
     "test:waiting-room-80k": "ts-node --files tests/waiting-room-80k-test.ts",
     "test:waiting-room-80k-plus-1": "ts-node --files tests/waiting-room-80k-plus-1-test.ts",
     "test:circuit-breaker": "ts-node --files tests/circuit-breaker-test.ts",
-    "test:autocannon": "ts-node --files tests/autocannon-load-test.ts",
+    "test:load": "ts-node --files tests/autocannon-load-test.ts",
+    "test:autocannon": "npm run test:load",
     "db:clean-test": "ts-node --files src/scripts/clean-test-data.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
@@ -26,6 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.840.0",
     "@google/generative-ai": "^0.24.1",
+    "@nestjs/platform-express": "^11.1.28",
     "@prisma/client": "^5.15.0",
     "amqplib": "^2.0.1",
     "bcryptjs": "^3.0.3",
@@ -47,6 +50,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/schematics": "^11.1.0",
+    "@nestjs/testing": "^11.1.28",
     "@types/amqplib": "^0.10.8",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -59,7 +65,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/qrcode": "^1.5.5",
     "@types/sanitize-html": "^2.16.1",
-    "autocannon": "^8.0.0",
     "prisma": "^5.15.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"

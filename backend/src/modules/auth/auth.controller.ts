@@ -1,6 +1,10 @@
-import { NextFunction, Request, Response } from 'express';
+import { Controller, Post, Get, Patch, Body, Req, UseGuards, HttpCode } from '@nestjs/common';
+import { Request } from 'express';
 import { z } from 'zod';
-import { authService } from './auth.service';
+import { AuthService } from './auth.service';
+import { AuthGuard } from '../../shared/guards/auth.guard';
+import { CurrentUser } from '../../shared/decorators/current-user.decorator';
+import { AuthUser } from '../../shared/types/auth';
 
 const passwordSchema = z.string().min(8);
 
@@ -32,74 +36,63 @@ const changePasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 
+@Controller('api/v1/auth')
 export class AuthController {
-  public async register(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = registerSchema.parse(req.body);
-      const result = await authService.register(dto);
-      return res.status(201).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('register')
+  @HttpCode(201)
+  public async register(@Body() body: any) {
+    const dto = registerSchema.parse(body);
+    const result = await this.authService.register(dto);
+    return { success: true, data: result };
   }
 
-  public async login(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = loginSchema.parse(req.body);
-      const result = await authService.login(dto.email, dto.password);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('login')
+  @HttpCode(200)
+  public async login(@Body() body: any) {
+    const dto = loginSchema.parse(body);
+    const result = await this.authService.login(dto.email, dto.password);
+    return { success: true, data: result };
   }
 
-  public async logout(req: Request, res: Response, next: NextFunction) {
-    try {
-      const refreshToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : undefined;
-      const result = await authService.logout(refreshToken);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('logout')
+  @HttpCode(200)
+  public async logout(@Body() body: any) {
+    const refreshToken = typeof body?.refreshToken === 'string' ? body.refreshToken : undefined;
+    const result = await this.authService.logout(refreshToken);
+    return { success: true, data: result };
   }
 
-  public async refresh(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = refreshSchema.parse(req.body);
-      const result = await authService.refresh(dto.refreshToken);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('refresh')
+  @HttpCode(200)
+  public async refresh(@Body() body: any) {
+    const dto = refreshSchema.parse(body);
+    const result = await this.authService.refresh(dto.refreshToken);
+    return { success: true, data: result };
   }
 
-  public async me(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await authService.me(req.user!);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Get('me')
+  @UseGuards(AuthGuard)
+  public async me(@CurrentUser() user: AuthUser) {
+    const result = await this.authService.me(user);
+    return { success: true, data: result };
   }
 
-  public async updateProfile(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = updateProfileSchema.parse(req.body);
-      const result = await authService.updateProfile(req.user!, dto);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Patch('me')
+  @UseGuards(AuthGuard)
+  public async updateProfile(@CurrentUser() user: AuthUser, @Body() body: any) {
+    const dto = updateProfileSchema.parse(body);
+    const result = await this.authService.updateProfile(user, dto);
+    return { success: true, data: result };
   }
 
-  public async changePassword(req: Request, res: Response, next: NextFunction) {
-    try {
-      const dto = changePasswordSchema.parse(req.body);
-      const result = await authService.changePassword(req.user!, dto);
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      return next(error);
-    }
+  @Post('change-password')
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  public async changePassword(@CurrentUser() user: AuthUser, @Body() body: any) {
+    const dto = changePasswordSchema.parse(body);
+    const result = await this.authService.changePassword(user, dto);
+    return { success: true, data: result };
   }
 }
-
