@@ -597,7 +597,7 @@ export const adminApi = {
     return apiRequest<ArtistBio>(`/ai/artist-bio/${id}/review`, {
       method: 'PATCH',
       token,
-      body: JSON.stringify({ reviewedBio }),
+      body: JSON.stringify({ reviewedContent: reviewedBio }),
     });
   },
   publishArtistBio(token: string, id: string) {
