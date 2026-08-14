@@ -14,6 +14,7 @@ import {
   Music,
 } from 'lucide-react';
 import { Concert, fetchConcertById } from '../../../../lib/api';
+import { formatCurrency, formatDateTime } from '../../../../lib/format';
 
 const getConcertImage = (title: string): string => {
   const normalized = title?.toLowerCase() || '';
@@ -23,20 +24,6 @@ const getConcertImage = (title: string): string => {
   if (normalized.includes('mtp special') || normalized.includes('special night')) return '/concert-7.png';
   return '/concert-4.png'; // default fallback
 };
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatCurrency(value: number) {
-  return `${Number(value).toLocaleString('vi-VN')} đ`;
-}
 
 export default function ConcertDetailPage() {
   const params = useParams();

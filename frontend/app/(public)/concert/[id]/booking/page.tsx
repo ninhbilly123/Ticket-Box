@@ -7,18 +7,15 @@ import {
   AlertTriangle,
   ArrowLeft,
   Calendar,
-  CheckCircle2,
   Clock3,
-  CreditCard,
-  ExternalLink,
-  History,
   MapPin,
   Music,
   RefreshCw,
   ShieldCheck,
   ShoppingCart,
-  Ticket,
 } from 'lucide-react';
+import OrderHistoryPanel from '../../../../../components/booking/OrderHistoryPanel';
+import OrderSummaryPanel from '../../../../../components/booking/OrderSummaryPanel';
 import SeatMap from '../../../../../components/SeatMap';
 import {
   AuthSession,
@@ -36,20 +33,7 @@ import {
   joinWaitingRoom,
 } from '../../../../../lib/api';
 import { useAuth } from '../../../../../lib/auth-context';
-
-function formatCurrency(value: number) {
-  return Number(value).toLocaleString('vi-VN') + ' đ';
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+import { formatCurrency, formatDateTime } from '../../../../../lib/format';
 
 function getErrorCode(error: unknown) {
   return (error as Error & { errorCode?: string })?.errorCode;
@@ -92,9 +76,6 @@ export default function ConcertDetailPage() {
   const maxSelectableQuantity = selectedTicketType
     ? Math.max(1, Math.min(selectedTicketType.remaining, selectedTicketType.maxLimitPerUser))
     : 1;
-
-  const paidTickets = orderSnapshot?.tickets || [];
-  const orderStatus = orderSnapshot?.order.status || holdResult?.orderStatus;
 
   function resetHoldIdempotencyKey() {
     holdIdempotencyKeyRef.current = null;
@@ -314,7 +295,7 @@ export default function ConcertDetailPage() {
         }
       } catch (err) {
         if (getErrorCode(err) !== 'WAITING_ROOM_NOT_FOUND') {
-          setHoldError((err as Error).message || 'Khong the kiem tra hang cho.');
+          setHoldError((err as Error).message || 'Kh?ng th? ki?m tra h?ng ch?.');
         }
       }
     }, 5000);
@@ -571,203 +552,24 @@ export default function ConcertDetailPage() {
           </div>
 
           {holdResult && (
-            <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
-              <div className={`flex items-center gap-2 font-bold text-sm ${
-                ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
-                  ? 'text-emerald-400'
-                  : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
-                  ? 'text-red-400'
-                  : 'text-yellow-400'
-              }`}>
-                {['paid', 'PAID'].includes(orderSnapshot?.order.status || '') ? (
-                  <CheckCircle2 className="w-5 h-5" />
-                ) : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '') ? (
-                  <AlertTriangle className="w-5 h-5" />
-                ) : (
-                  <Clock3 className="w-5 h-5" />
-                )}
-                {['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
-                  ? 'Đơn hàng thanh toán thành công'
-                  : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
-                  ? 'Đơn hàng thanh toán thất bại'
-                  : 'Order đang chờ thanh toán'}
-              </div>
-
-              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Order ID</span>
-                  <span className="font-mono font-bold text-white text-right">{holdResult.orderId}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Trạng thái</span>
-                  <span className={`font-bold uppercase ${
-                    ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')
-                      ? 'text-emerald-400'
-                      : ['failed', 'FAILED', 'cancelled', 'CANCELLED'].includes(orderSnapshot?.order.status || '')
-                      ? 'text-red-400'
-                      : 'text-yellow-300'
-                  }`}>
-                    {orderStatus}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Hết hạn giữ vé</span>
-                  <span className="font-bold text-white">{formatDateTime(holdResult.expiresAt)}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-800 pt-2">
-                  <span className="text-slate-400 font-semibold">Tổng tiền</span>
-                  <span className="font-extrabold text-lg text-indigo-400">{formatCurrency(holdResult.totalAmount)}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {holdResult.items.map((item) => (
-                  <div key={item.ticketTypeId} className="flex justify-between rounded-lg bg-slate-900/50 px-3 py-2">
-                    <span className="text-slate-300">{item.ticketTypeName}</span>
-                    <span className="font-bold text-white">
-                      {item.quantity} x {formatCurrency(item.unitPrice)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleStartPayment}
-                disabled={paymentLoading || ['paid', 'PAID'].includes(orderSnapshot?.order.status || '')}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all"
-              >
-                {paymentLoading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Đang tạo thanh toán...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-4 h-4" />
-                    Thanh toán VNPAY
-                  </>
-                )}
-              </button>
-
-              {paymentUrl && (
-                <a
-                  href={paymentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-center shadow-md hover:shadow-lg transition-all"
-                >
-                  Mở lại trang thanh toán
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
-
-              <button
-                type="button"
-                onClick={checkPaymentStatus}
-                disabled={checkingPayment}
-                className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all"
-              >
-                {checkingPayment ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-                    Đang kiểm tra...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
-                    Kiểm tra kết quả thanh toán
-                  </>
-                )}
-              </button>
-
-              {['paid', 'PAID'].includes(orderSnapshot?.order.status || '') && (
-                <div className="space-y-3 border-t border-slate-800 pt-4">
-                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                    <CheckCircle2 className="w-5 h-5" />
-                    Đã cấp e-ticket
-                  </div>
-                  {paidTickets.map((ticket) => (
-                    <div key={ticket.id} className="bg-white text-slate-950 p-4 rounded-xl">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] uppercase text-slate-500 font-bold">Ticket code</p>
-                          <p className="font-mono text-xs font-bold">{ticket.id}</p>
-                        </div>
-                        <Ticket className="w-7 h-7 text-indigo-600" />
-                      </div>
-                      <div className="mt-3 bg-slate-100 border border-slate-200 rounded-lg p-3 text-center">
-                        <p className="font-mono text-[11px] break-all">{ticket.qrCode || ticket.id}</p>
-                      </div>
-                      <div className="mt-3 flex justify-between text-xs">
-                        <span className="text-slate-500">Trạng thái</span>
-                        <span className="font-bold text-emerald-600">{ticket.status}</span>
-                      </div>
-                      <div className="mt-1 flex justify-between text-xs">
-                        <span className="text-slate-500">Ghế</span>
-                        <span className="font-bold">{ticket.seatNumber || 'N/A'}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {['failed', 'CANCELLED', 'expired'].includes(orderSnapshot?.order.status || '') && (
-                <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-red-200">
-                  Đơn hàng đã thất bại hoặc hết hạn. Vé giữ tạm đã được hoàn về tồn kho.
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={resetCheckout}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold py-2 px-4 rounded-xl transition-all"
-              >
-                Đặt vé mới
-              </button>
-            </div>
+            <OrderSummaryPanel
+              holdResult={holdResult}
+              orderSnapshot={orderSnapshot}
+              paymentUrl={paymentUrl}
+              paymentLoading={paymentLoading}
+              checkingPayment={checkingPayment}
+              onStartPayment={handleStartPayment}
+              onCheckPaymentStatus={checkPaymentStatus}
+              onResetCheckout={resetCheckout}
+            />
           )}
 
-          <div className="bg-gray-900 p-5 rounded-2xl border border-gray-800 shadow-xl">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <History className="w-4 h-4 text-indigo-400" />
-                Lịch sử đơn hàng
-              </h3>
-              <button
-                type="button"
-                onClick={() => loadHistory()}
-                disabled={!session || historyLoading}
-                className="h-8 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-xs font-bold text-white"
-              >
-                Tải
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {!session ? (
-                <p className="text-xs text-gray-500">Đăng nhập để xem lịch sử.</p>
-              ) : history.length === 0 ? (
-                <p className="text-xs text-gray-500">Chưa có dữ liệu lịch sử.</p>
-              ) : (
-                history.map((item) => (
-                  <div key={item.orderId} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3 text-xs">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-white">{item.concertName}</p>
-                        <p className="text-gray-500 mt-0.5">{formatDateTime(item.createdAt)}</p>
-                      </div>
-                      <span className="font-bold text-indigo-300">{item.status}</span>
-                    </div>
-                    <div className="mt-2 flex justify-between text-gray-400">
-                      <span>{item.tickets.length} vé</span>
-                      <span className="font-bold text-white">{formatCurrency(item.totalAmount)}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <OrderHistoryPanel
+            sessionAvailable={Boolean(session)}
+            history={history}
+            loading={historyLoading}
+            onReload={() => loadHistory()}
+          />
         </div>
       </div>
     </div>

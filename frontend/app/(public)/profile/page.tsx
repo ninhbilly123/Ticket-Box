@@ -18,21 +18,8 @@ import {
 } from 'lucide-react';
 import { TicketHistoryItem, fetchTicketHistory, initiatePayment, updateProfile } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth-context';
+import { formatCurrency, formatDateTime } from '../../../lib/format';
 import QrCodeImage from '../../../components/QrCodeImage';
-
-function formatCurrency(value: number) {
-  return Number(value).toLocaleString('vi-VN') + ' đ';
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);

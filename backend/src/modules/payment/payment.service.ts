@@ -472,8 +472,32 @@ export class PaymentService {
 
   public async handleVNPAYReturn(query: Record<string, unknown>) {
     const result = await this.processVNPAYReturn(query);
-    const statusText = result.success ? 'Thanh toán thành công' : 'Thanh toán thất bại';
-    return `<!DOCTYPE html><html><head><title>Kết quả thanh toán</title></head><body><h1>${statusText}</h1><p>Mã đơn hàng: ${result.payment?.orderId || ''}</p></body></html>`;
+    const redirectUrl = this.buildPaymentResultUrl(result.payment?.orderId, result.success);
+    const statusText = result.success ? 'Thanh to?n th?nh c?ng' : 'Thanh to?n ch?a ho?n t?t';
+
+    return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="1;url=${this.escapeHtml(redirectUrl)}" />
+  <title>K?t qu? thanh to?n</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: Arial, sans-serif; background: #020617; color: #e5e7eb; }
+    main { width: min(92vw, 520px); border: 1px solid #1f2937; border-radius: 16px; background: #111827; padding: 28px; text-align: center; }
+    h1 { margin: 0 0 10px; font-size: 24px; color: #fff; }
+    p { color: #9ca3af; line-height: 1.6; }
+    a { color: #67e8f9; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${this.escapeHtml(statusText)}</h1>
+    <p>?ang chuy?n v? TicketBox ?? xem tr?ng th?i ??n h?ng.</p>
+    <p><a href="${this.escapeHtml(redirectUrl)}">M? trang k?t qu? thanh to?n</a></p>
+  </main>
+</body>
+</html>`;
   }
 
   public async renderMockCheckout(_query: Record<string, unknown>) {
@@ -502,6 +526,23 @@ export class PaymentService {
       return this.processPaymentStatusUpdate(paymentId, status);
     }
     return { message: 'Webhook received' };
+  }
+
+  private buildPaymentResultUrl(orderId: string | undefined, success: boolean) {
+    const frontendBaseUrl = process.env.CUSTOMER_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3001';
+    const url = new URL('/payment/result', frontendBaseUrl);
+    if (orderId) url.searchParams.set('orderId', orderId);
+    url.searchParams.set('status', success ? 'paid' : 'failed');
+    return url.toString();
+  }
+
+  private escapeHtml(value: string) {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private normalizeGateway(gateway: string): PaymentGateway {
