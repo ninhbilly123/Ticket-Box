@@ -1,7 +1,8 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
   AlertTriangle,
   BadgeCheck,
   BarChart3,
@@ -35,10 +36,11 @@ import {
   writeStoredAdminSession,
 } from '../lib/api';
 import { ArtistBioTab, SponsorEmailTab, VipSyncTab } from '../components/integration-tabs';
+import CheckinMonitor from '../components/checkin-monitor';
 import ConcertSetup from '../components/concert-setup';
 import { formatRoleLabel, formatStatusLabel } from '../lib/ui-labels';
 
-type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
+type TabKey = 'overview' | 'concerts' | 'tickets' | 'staff' | 'checkin' | 'sponsors' | 'ai-bio' | 'vip-sync' | 'revenue';
 type RevenueTicketTypeRow = { name: string; quantity: number; revenue: number };
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
@@ -46,6 +48,7 @@ const tabs: Array<{ key: TabKey; label: string; icon: typeof BarChart3 }> = [
   { key: 'concerts', label: 'Sự kiện', icon: CalendarClock },
   { key: 'tickets', label: 'Loại vé', icon: Ticket },
   { key: 'staff', label: 'Nhân viên', icon: Users },
+  { key: 'checkin', label: 'Check-in', icon: Activity },
   { key: 'sponsors', label: 'Email nhãn hàng', icon: Building2 },
   { key: 'ai-bio', label: 'Tiểu sử nghệ sĩ AI', icon: BrainCircuit },
   { key: 'vip-sync', label: 'Đồng bộ khách VIP', icon: RefreshCw },
@@ -115,7 +118,7 @@ export default function AdminHomePage() {
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
-  const [cancelReason, setCancelReason] = useState('Ban tổ chức hủy sự kiện');
+  const [cancelReason] = useState('Ban tổ chức hủy sự kiện');
   const [concertQuery, setConcertQuery] = useState('');
   const [concertStatusFilter, setConcertStatusFilter] = useState('ALL');
   const [concertSort, setConcertSort] = useState('startAt-asc');
@@ -204,6 +207,44 @@ export default function AdminHomePage() {
   const revenuePageCount = Math.max(1, Math.ceil(filteredRevenueRows.length / REVENUE_PAGE_SIZE));
   const pagedRevenueRows = paginate(filteredRevenueRows, revenuePage, REVENUE_PAGE_SIZE);
 
+  const loadAll = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [concertList, staffList] = await Promise.all([
+        adminApi.listConcerts(token),
+        adminApi.listStaff(token),
+      ]);
+      setConcerts(concertList);
+      setStaffUsers(staffList);
+      setSelectedConcertId((current) => current || concertList[0]?.id || '');
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  const loadConcertScoped = useCallback(async (concertId: string) => {
+    if (!token || !concertId) return;
+    try {
+      const [ticketTypeList, assignmentList, revenueData] = await Promise.all([
+        adminApi.listTicketTypes(token, concertId),
+        adminApi.listStaffAssignments(token, concertId),
+        adminApi.revenueSummary(token, concertId),
+      ]);
+      setTicketTypes(ticketTypeList);
+      setStaffAssignments(assignmentList);
+      setRevenue(revenueData);
+      setInventoryDrafts(
+        Object.fromEntries(ticketTypeList.map((item) => [item.id, String(item.inventory?.totalQuantity || item.totalQuantity)]))
+      );
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }, [token]);
+
   useEffect(() => {
     const syncSessionFromStorage = () => {
       setSession(readStoredAdminSession());
@@ -237,13 +278,13 @@ export default function AdminHomePage() {
     if (session && isOrganizer) {
       void loadAll();
     }
-  }, [session?.accessToken]);
+  }, [isOrganizer, loadAll, session]);
 
   useEffect(() => {
     if (session && selectedConcert?.id) {
       void loadConcertScoped(selectedConcert.id);
     }
-  }, [session?.accessToken, selectedConcert?.id]);
+  }, [loadConcertScoped, selectedConcert?.id, session]);
 
   useEffect(() => {
     if (!notice) return;
@@ -286,46 +327,6 @@ export default function AdminHomePage() {
   useEffect(() => {
     resetTicketTypeForm();
   }, [selectedConcert?.id]);
-
-  async function loadAll() {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [concertList, staffList] = await Promise.all([
-        adminApi.listConcerts(token),
-        adminApi.listStaff(token),
-      ]);
-      setConcerts(concertList);
-      setStaffUsers(staffList);
-      if (!selectedConcertId && concertList[0]) {
-        setSelectedConcertId(concertList[0].id);
-      }
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadConcertScoped(concertId: string) {
-    if (!token || !concertId) return;
-    try {
-      const [ticketTypeList, assignmentList, revenueData] = await Promise.all([
-        adminApi.listTicketTypes(token, concertId),
-        adminApi.listStaffAssignments(token, concertId),
-        adminApi.revenueSummary(token, concertId),
-      ]);
-      setTicketTypes(ticketTypeList);
-      setStaffAssignments(assignmentList);
-      setRevenue(revenueData);
-      setInventoryDrafts(
-        Object.fromEntries(ticketTypeList.map((item) => [item.id, String(item.inventory?.totalQuantity || item.totalQuantity)]))
-      );
-    } catch (err) {
-      setError(getErrorMessage(err));
-    }
-  }
 
   // Hàm này sẽ được gọi khi user submit form login, nó sẽ gọi API login để lấy session mới và lưu vào localStorage và state, nếu có lỗi sẽ hiển thị lỗi ra UI
   // trong một session là gồm accessToken, refreshToken, user (id, email, fullName, role, organizationId)
@@ -575,10 +576,10 @@ export default function AdminHomePage() {
 
           <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
             <p className="font-semibold text-slate-900">Cách chạy khi demo:</p>
-            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">cd scanner-app</code>
-            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">npm start</code>
+            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">cd scanner-android</code>
+            <code className="rounded bg-white px-3 py-2 font-mono text-xs text-slate-700">.\gradlew.bat assembleDebug</code>
             <p>
-              Sau đó mở Expo Go trên điện thoại và nhập API URL dạng{' '}
+              Mở project bằng Android Studio hoặc cài APK debug trên thiết bị, sau đó cấu hình API URL dạng{' '}
               <span className="font-mono text-xs">http://IP-LAPTOP:3000/api/v1</span>.
             </p>
           </div>
@@ -1177,6 +1178,10 @@ export default function AdminHomePage() {
           </div>
         </div>
       );
+    }
+
+    if (activeTab === 'checkin') {
+      return <CheckinMonitor token={token} concert={selectedConcert} staffAssignments={staffAssignments} />;
     }
 
     if (activeTab === 'sponsors') {

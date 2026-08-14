@@ -301,7 +301,7 @@ export function ArtistBioTab({ token, concerts, selectedConcertId, onSelectConce
     if (!artistBio || !['UPLOADED', 'PROCESSING'].includes(artistBio.status)) return;
     const timer = window.setInterval(() => void loadArtistBio(artistBio.concertId), 3000);
     return () => window.clearInterval(timer);
-  }, [artistBio?.id, artistBio?.status, artistBio?.concertId, loadArtistBio]);
+  }, [artistBio, loadArtistBio]);
 
   useEffect(() => {
     if (!notice) return;

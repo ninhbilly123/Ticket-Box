@@ -8,6 +8,7 @@ import { AuthorizationService } from '../rbac/authorization.service';
 import { normalizeRole } from '../rbac/roles';
 import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
 import { sanitizeAndValidateSeatMapSvg } from '../../shared/lib/seat-map-svg';
+import { CheckinStatsService } from '../checkin/checkin-stats.service';
 import { AdminConcertAccessService } from './admin-concert-access.service';
 import { AdminReadinessService } from './admin-readiness.service';
 import { AdminTicketTypeService, TicketTypeInput, TicketTypeUpdateInput } from './admin-ticket-type.service';
@@ -31,7 +32,8 @@ export class AdminService {
     private readonly authorizationService: AuthorizationService,
     private readonly concertAccess: AdminConcertAccessService,
     private readonly readinessService: AdminReadinessService,
-    private readonly ticketTypeService: AdminTicketTypeService
+    private readonly ticketTypeService: AdminTicketTypeService,
+    private readonly checkinStatsService: CheckinStatsService
   ) {}
   public async listConcerts(user: AuthUser) {
     return this.prisma.concert.findMany({
@@ -267,6 +269,11 @@ export class AdminService {
       include: { staff: { select: { id: true, email: true, fullName: true, role: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  public async getCheckinStats(user: AuthUser, concertId: string) {
+    await this.assertCanManageConcert(user, concertId);
+    return this.checkinStatsService.getStats(concertId);
   }
 
   public async createStaffAssignment(user: AuthUser, concertId: string, staffId: string, gateId: string) {

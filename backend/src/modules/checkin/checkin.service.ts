@@ -2,12 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
+import { CheckinStatsService } from './checkin-stats.service';
 
 @Injectable()
 export class CheckinService {
   private readonly logger = new Logger(CheckinService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly checkinStatsService: CheckinStatsService
+  ) {}
   public async listAssignedConcerts(staffId: string) {
     const assignments = await this.prisma.staffAssignment.findMany({
       where: { staffId },
@@ -496,58 +500,7 @@ export class CheckinService {
    */
   public async getCheckinStats(concertId: string, gateStaffId: string) {
     await this.assertStaffCanScanConcert(gateStaffId, concertId);
-    const ticketTypes = await this.prisma.ticketType.findMany({
-      where: { concertId },
-    });
-
-    const breakdown: Record<string, { total: number; checkedIn: number; percent: number }> = {};
-    let grandTotal = 0;
-    let grandCheckedIn = 0;
-
-    for (const tt of ticketTypes) {
-      // Đếm tổng số vé đã phát hành bán thành công của hạng này
-      const total = await this.prisma.ticket.count({
-        where: {
-          orderItem: {
-            ticketTypeId: tt.id,
-            order: {
-              status: 'paid',
-            },
-          },
-        },
-      });
-
-      // Đếm số vé đã được quét soát thành công
-      const checkedIn = await this.prisma.ticket.count({
-        where: {
-          orderItem: {
-            ticketTypeId: tt.id,
-            order: {
-              status: 'paid',
-            },
-          },
-          status: 'used',
-        },
-      });
-
-      const percent = total > 0 ? Number(((checkedIn / total) * 100).toFixed(1)) : 0;
-
-      breakdown[tt.name] = {
-        total,
-        checkedIn,
-        percent,
-      };
-
-      grandTotal += total;
-      grandCheckedIn += checkedIn;
-    }
-
-    return {
-      totalTickets: grandTotal,
-      checkedInTickets: grandCheckedIn,
-      percent: grandTotal > 0 ? Number(((grandCheckedIn / grandTotal) * 100).toFixed(1)) : 0,
-      byTicketType: breakdown,
-    };
+    return this.checkinStatsService.getStats(concertId);
   }
 
   private async assertStaffCanScanConcert(staffId: string, concertId: string) {

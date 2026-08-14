@@ -238,6 +238,12 @@ export class AdminController {
     return { success: true, data: result };
   }
 
+  @Get('concerts/:concertId/checkin-stats')
+  public async getCheckinStats(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string) {
+    const result = await this.adminService.getCheckinStats(user, concertId);
+    return { success: true, data: result };
+  }
+
   @Post('concerts/:concertId/staff-assignments')
   public async createStaffAssignment(@CurrentUser() user: AuthUser, @Param('concertId') concertId: string, @Body() body: unknown) {
     const dto = staffAssignmentSchema.parse(body);

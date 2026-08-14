@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -43,6 +43,20 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
   });
   const isDraft = concert.status === 'DRAFT';
 
+  const loadSetup = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [nextReadiness, nextArtists] = await Promise.all([
+        adminApi.getConcertReadiness(token, concert.id),
+        adminApi.listConcertArtists(token, concert.id),
+      ]);
+      setReadiness(nextReadiness);
+      setArtists(nextArtists);
+    } finally {
+      setLoading(false);
+    }
+  }, [concert.id, token]);
+
   useEffect(() => {
     setForm({
       eventCode: concert.eventCode,
@@ -55,21 +69,19 @@ export default function ConcertSetup({ token, concert, saving, runMutation }: Co
     });
     setSeatMapFile(null);
     void loadSetup();
-  }, [concert.id, concert.status, concert.svgSeatingMap, concert.seatMapEnabled]);
-
-  async function loadSetup() {
-    setLoading(true);
-    try {
-      const [nextReadiness, nextArtists] = await Promise.all([
-        adminApi.getConcertReadiness(token, concert.id),
-        adminApi.listConcertArtists(token, concert.id),
-      ]);
-      setReadiness(nextReadiness);
-      setArtists(nextArtists);
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [
+    concert.description,
+    concert.eventCode,
+    concert.id,
+    concert.name,
+    concert.saleOpenAt,
+    concert.seatMapEnabled,
+    concert.startAt,
+    concert.status,
+    concert.svgSeatingMap,
+    concert.venue,
+    loadSetup,
+  ]);
 
   async function mutate(action: () => Promise<unknown>, message: string) {
     await runMutation(action, message);
