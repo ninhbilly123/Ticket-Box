@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { Calendar, MapPin, Music, Search, SlidersHorizontal, RefreshCw } from 'lucide-react';
 import { Concert, fetchConcerts } from '../../lib/api';
@@ -14,6 +15,13 @@ const getConcertImage = (title: string): string => {
   return '/concert-4.png'; // default fallback
 };
 
+interface ConcertFilterState {
+  search?: string;
+  artist?: string;
+  location?: string;
+  date?: string;
+}
+
 export default function ConcertListingPage() {
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,41 +34,34 @@ export default function ConcertListingPage() {
   const [date, setDate] = useState('');
 
   // Load concerts
-  const loadConcerts = async (overrides?: {
-    search?: string;
-    artist?: string;
-    location?: string;
-    date?: string;
-  }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const currentSearch = overrides && 'search' in overrides ? overrides.search : search;
-      const currentArtist = overrides && 'artist' in overrides ? overrides.artist : artist;
-      const currentLoc = overrides && 'location' in overrides ? overrides.location : location;
-      const currentDate = overrides && 'date' in overrides ? overrides.date : date;
-
-      const data = await fetchConcerts({
-        search: currentSearch || undefined,
-        artist: currentArtist || undefined,
-        location: currentLoc || undefined,
-        date: currentDate || undefined,
-      });
-      setConcerts(data);
-    } catch (err: any) {
-      setError(err.message || 'Không thể tải danh sách concert.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadConcerts = useCallback(
+    async (filters: ConcertFilterState = {}) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchConcerts({
+          search: filters.search || undefined,
+          artist: filters.artist || undefined,
+          location: filters.location || undefined,
+          date: filters.date || undefined,
+        });
+        setConcerts(data);
+      } catch (err) {
+        setError((err as Error).message || 'Không thể tải danh sách concert.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     loadConcerts();
-  }, []); // Run once on mount
+  }, [loadConcerts]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loadConcerts();
+    loadConcerts({ search, artist, location, date });
   };
 
   const clearFilters = () => {
@@ -129,7 +130,7 @@ export default function ConcertListingPage() {
               onChange={(e) => {
                 const val = e.target.value;
                 setArtist(val);
-                loadConcerts({ artist: val });
+                loadConcerts({ search, artist: val, location, date });
               }}
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
@@ -146,7 +147,7 @@ export default function ConcertListingPage() {
               onChange={(e) => {
                 const val = e.target.value;
                 setLocation(val);
-                loadConcerts({ location: val });
+                loadConcerts({ search, artist, location: val, date });
               }}
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
@@ -162,7 +163,7 @@ export default function ConcertListingPage() {
               onChange={(e) => {
                 const val = e.target.value;
                 setDate(val);
-                loadConcerts({ date: val });
+                loadConcerts({ search, artist, location, date: val });
               }}
               onClick={(e) => {
                 try {
@@ -182,7 +183,7 @@ export default function ConcertListingPage() {
               Xóa bộ lọc
             </button>
             <button
-              onClick={() => loadConcerts()}
+              onClick={() => loadConcerts({ search, artist, location, date })}
               className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/30 hover:bg-indigo-950 hover:text-white transition-all py-2 px-3 rounded-lg text-xs flex items-center gap-1.5 font-medium"
             >
               <RefreshCw className="w-3.5 h-3.5" />
@@ -201,7 +202,7 @@ export default function ConcertListingPage() {
           <div className="bg-red-950/20 border border-red-900/50 p-6 rounded-2xl text-center max-w-md mx-auto my-10 text-red-200">
             <p className="font-semibold mb-2">Đã xảy ra lỗi</p>
             <p className="text-sm text-red-300/80 mb-4">{error}</p>
-            <button onClick={() => loadConcerts()} className="bg-red-900 hover:bg-red-800 text-white text-xs px-4 py-2 rounded-lg">
+            <button onClick={() => loadConcerts({ search, artist, location, date })} className="bg-red-900 hover:bg-red-800 text-white text-xs px-4 py-2 rounded-lg">
               Thử lại
             </button>
           </div>
@@ -226,9 +227,11 @@ export default function ConcertListingPage() {
                 >
                   {/* Concert Banner Image */}
                   <div className="h-48 relative overflow-hidden flex flex-col justify-end p-6">
-                    <img 
-                      src={getConcertImage(concert.title)} 
+                    <Image
+                      src={getConcertImage(concert.title)}
                       alt={concert.title}
+                      fill
+                      sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent"></div>

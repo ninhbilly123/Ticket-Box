@@ -31,7 +31,8 @@ function RegisterForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const redirect = searchParams.get('redirect') || '/';
+  const requestedRedirect = searchParams.get('redirect');
+  const redirect = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//') ? requestedRedirect : '/';
 
   useEffect(() => {
     if (status === 'authenticated' && session) {

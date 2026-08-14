@@ -44,14 +44,14 @@ export interface Concert {
   ticketTypes: TicketType[];
 }
 
-async function readApiJson(res: Response, fallbackMessage: string) {
+async function readApiJson<T>(res: Response, fallbackMessage: string): Promise<T> {
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.success) {
     const error = new Error(json.message || json.error?.message || fallbackMessage);
     (error as Error & { errorCode?: string }).errorCode = json.errorCode || json.error?.code;
     throw error;
   }
-  return json;
+  return json.data as T;
 }
 
 export async function fetchConcerts(filters: {
@@ -69,22 +69,14 @@ export async function fetchConcerts(filters: {
   const res = await fetch(`${API_BASE_URL}/concerts?${queryParams.toString()}`, {
     cache: 'no-store', // Disable caching to fetch real-time remaining tickets
   });
-  const json = await res.json();
-  if (!json.success) {
-    throw new Error(json.error?.message || 'Failed to fetch concerts');
-  }
-  return json.data;
+  return readApiJson<Concert[]>(res, 'Failed to fetch concerts');
 }
 
 export async function fetchConcertById(id: string): Promise<Concert> {
   const res = await fetch(`${API_BASE_URL}/concerts/${id}`, {
     cache: 'no-store', // Always get fresh data
   });
-  const json = await res.json();
-  if (!json.success) {
-    throw new Error(json.error?.message || 'Failed to fetch concert details');
-  }
-  return json.data;
+  return readApiJson<Concert>(res, 'Failed to fetch concert details');
 }
 
 export interface AuthSession {
@@ -108,8 +100,7 @@ export async function login(params: { email: string; password: string }): Promis
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
-  const json = await readApiJson(res, 'Đăng nhập thất bại');
-  return json.data;
+  return readApiJson<AuthSession>(res, 'Đăng nhập thất bại');
 }
 
 export async function register(params: {
@@ -123,8 +114,7 @@ export async function register(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
-  const json = await readApiJson(res, 'Register failed');
-  return json.data;
+  return readApiJson<AuthSession>(res, 'Register failed');
 }
 
 export async function refreshAuth(refreshToken: string): Promise<AuthSession> {
@@ -133,8 +123,7 @@ export async function refreshAuth(refreshToken: string): Promise<AuthSession> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
   });
-  const json = await readApiJson(res, 'Session expired');
-  return json.data;
+  return readApiJson<AuthSession>(res, 'Session expired');
 }
 
 export async function logoutAuth(refreshToken?: string): Promise<void> {
@@ -152,8 +141,7 @@ export async function fetchCurrentUser(accessToken: string): Promise<AuthSession
     },
     cache: 'no-store',
   });
-  const json = await readApiJson(res, 'Cannot load profile');
-  return json.data;
+  return readApiJson<AuthSession['user']>(res, 'Cannot load profile');
 }
 
 export async function updateProfile(
@@ -168,8 +156,7 @@ export async function updateProfile(
     },
     body: JSON.stringify(payload),
   });
-  const json = await readApiJson(res, 'Không thể cập nhật hồ sơ');
-  return json.data;
+  return readApiJson<AuthSession['user']>(res, 'Không thể cập nhật hồ sơ');
 }
 
 export async function changePassword(
@@ -184,8 +171,7 @@ export async function changePassword(
     },
     body: JSON.stringify(payload),
   });
-  const json = await readApiJson(res, 'Không thể đổi mật khẩu');
-  return json.data;
+  return readApiJson<{ changed: boolean }>(res, 'Không thể đổi mật khẩu');
 }
 
 export type WaitingRoomStatus =
@@ -202,8 +188,7 @@ export async function joinWaitingRoom(params: {
       Authorization: `Bearer ${params.accessToken}`,
     },
   });
-  const json = await readApiJson(res, 'Không thể tham gia hàng chờ');
-  return json.data;
+  return readApiJson<WaitingRoomStatus>(res, 'Không thể tham gia hàng chờ');
 }
 
 export async function fetchWaitingRoomStatus(params: {
@@ -216,8 +201,7 @@ export async function fetchWaitingRoomStatus(params: {
     },
     cache: 'no-store',
   });
-  const json = await readApiJson(res, 'Không thể kiểm tra hàng chờ');
-  return json.data;
+  return readApiJson<WaitingRoomStatus>(res, 'Không thể kiểm tra hàng chờ');
 }
 
 export interface HoldOrderResponse {
@@ -259,8 +243,7 @@ export async function holdOrder(params: {
       items: [{ ticketTypeId: params.ticketTypeId, quantity: params.quantity }],
     }),
   });
-  const json = await readApiJson(res, 'Giữ vé thất bại');
-  return json.data;
+  return readApiJson<HoldOrderResponse>(res, 'Giữ vé thất bại');
 }
 
 export interface BookTicketsResponse {
@@ -284,26 +267,6 @@ export interface BookTicketsResponse {
   }>;
 }
 
-export async function bookTickets(params: {
-  userId: string;
-  concertId: string;
-  ticketTypeId: string;
-  quantity: number;
-}): Promise<BookTicketsResponse> {
-  const res = await fetch(`${API_BASE_URL}/tickets/book`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(params),
-  });
-  const json = await res.json();
-  if (!json.success) {
-    throw new Error(json.error?.message || 'Failed to book tickets');
-  }
-  return json.data;
-}
-
 export async function fetchOrderById(id: string, accessToken: string): Promise<BookTicketsResponse> {
   const res = await fetch(`${API_BASE_URL}/tickets/order/${id}`, {
     headers: {
@@ -311,11 +274,7 @@ export async function fetchOrderById(id: string, accessToken: string): Promise<B
     },
     cache: 'no-store',
   });
-  const json = await res.json();
-  if (!json.success) {
-    throw new Error(json.error?.message || 'Failed to fetch order details');
-  }
-  return json.data;
+  return readApiJson<BookTicketsResponse>(res, 'Failed to fetch order details');
 }
 
 export interface TicketHistoryItem {
@@ -350,8 +309,7 @@ export async function fetchTicketHistory(accessToken: string): Promise<TicketHis
     },
     cache: 'no-store',
   });
-  const json = await readApiJson(res, 'Không thể tải lịch sử đơn hàng');
-  return json.data;
+  return readApiJson<TicketHistoryItem[]>(res, 'Không thể tải lịch sử đơn hàng');
 }
 
 export interface InitiatePaymentResponse {
@@ -365,7 +323,7 @@ export async function initiatePayment(params: {
   accessToken: string;
   idempotencyKey?: string;
 }): Promise<InitiatePaymentResponse> {
-  const headers: any = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${params.accessToken}`,
   };
@@ -381,10 +339,6 @@ export async function initiatePayment(params: {
       gateway: params.gateway,
     }),
   });
-  const json = await res.json();
-  if (!json.success) {
-    throw new Error(json.error?.message || 'Failed to initiate payment');
-  }
-  return json.data;
+  return readApiJson<InitiatePaymentResponse>(res, 'Failed to initiate payment');
 }
 

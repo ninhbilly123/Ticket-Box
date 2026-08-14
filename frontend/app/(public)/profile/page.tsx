@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Calendar,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { TicketHistoryItem, fetchTicketHistory, initiatePayment, updateProfile } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth-context';
+import QrCodeImage from '../../../components/QrCodeImage';
 
 function formatCurrency(value: number) {
   return Number(value).toLocaleString('vi-VN') + ' đ';
@@ -37,10 +38,6 @@ function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'TB';
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
-}
-
-function getQrImageSrc(value: string) {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=12&data=${encodeURIComponent(value)}`;
 }
 
 function statusClass(status: string) {
@@ -70,9 +67,9 @@ export default function ProfilePage() {
       fullName: session.user.fullName || '',
       phone: session.user.phone || '',
     });
-  }, [session?.user.fullName, session?.user.phone]);
+  }, [session]);
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     if (!session) return;
 
     setLoadingHistory(true);
@@ -85,7 +82,7 @@ export default function ProfilePage() {
     } finally {
       setLoadingHistory(false);
     }
-  }
+  }, [session]);
 
   async function handleProfileSubmit(event: FormEvent) {
     event.preventDefault();
@@ -142,7 +139,7 @@ export default function ProfilePage() {
     return () => {
       window.removeEventListener('focus', handleFocus);
     };
-  }, [session?.accessToken]);
+  }, [loadHistory, session?.accessToken]);
 
   if (status === 'loading') {
     return (
@@ -340,7 +337,7 @@ export default function ProfilePage() {
                               <div className="flex flex-col items-center gap-2">
                                 {ticket.qrCode ? (
                                   <div className="rounded-xl bg-white p-2">
-                                    <img src={getQrImageSrc(ticket.qrCode)} alt="Mã QR của vé" className="h-40 w-40" />
+                                    <QrCodeImage value={ticket.qrCode} alt="Mã QR của vé" className="h-40 w-40" />
                                   </div>
                                 ) : (
                                   <div className="flex h-40 w-40 items-center justify-center rounded-xl border border-dashed border-gray-700 text-gray-500">

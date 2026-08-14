@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
   AlertTriangle,
@@ -11,7 +12,6 @@ import {
   MapPin,
   Mic2,
   Music,
-  Ticket,
 } from 'lucide-react';
 import { Concert, fetchConcertById } from '../../../../lib/api';
 
@@ -119,9 +119,11 @@ export default function ConcertDetailPage() {
 
         {/* Concert Banner Image */}
         <div className="w-full h-64 md:h-96 rounded-3xl overflow-hidden relative border border-gray-800 shadow-2xl">
-          <img 
-            src={getConcertImage(concert.title)} 
-            alt={concert.title} 
+          <Image
+            src={getConcertImage(concert.title)}
+            alt={concert.title}
+            fill
+            sizes="(min-width: 768px) 768px, 100vw"
             className="w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>

@@ -40,13 +40,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 function readStoredSession() {
   if (typeof window === 'undefined') return null;
 
-  const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+
+  const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
   if (!raw) return null;
 
   try {
     return JSON.parse(raw) as AuthSession;
   } catch {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
     return null;
   }
 }
@@ -56,10 +58,12 @@ function writeStoredSession(session: AuthSession | null) {
 
   if (!session) {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
     return;
   }
 
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

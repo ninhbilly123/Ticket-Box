@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -59,7 +59,7 @@ export default function ConcertDetailPage() {
   const params = useParams();
   const router = useRouter();
   const concertId = params.id as string;
-  const { session, status: authStatus } = useAuth();
+  const { session } = useAuth();
 
   const [concert, setConcert] = useState<Concert | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,7 +107,7 @@ export default function ConcertDetailPage() {
     return holdIdempotencyKeyRef.current;
   }
 
-  async function loadConcert(showSpinner = true) {
+  const loadConcert = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     setError(null);
 
@@ -115,73 +115,24 @@ export default function ConcertDetailPage() {
       const data = await fetchConcertById(concertId);
       setConcert(data);
 
-      if (!selectedTicketTypeId && data.ticketTypes.length > 0) {
+      if (data.ticketTypes.length > 0) {
         const firstAvailable = data.ticketTypes.find((ticketType) => ticketType.remaining > 0);
-        setSelectedTicketTypeId((firstAvailable || data.ticketTypes[0]).id);
+        setSelectedTicketTypeId((current) => current || (firstAvailable || data.ticketTypes[0]).id);
       }
     } catch (err) {
       setError((err as Error).message || 'Không thể tải chi tiết concert.');
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    if (concertId) {
-      loadConcert();
-    }
   }, [concertId]);
 
-  useEffect(() => {
-    if (session) {
-      loadHistory(session);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    if (!session || waitingStatus?.status !== 'WAITING') return;
-
-    const timer = window.setInterval(async () => {
-      try {
-        const status = await fetchWaitingRoomStatus({
-          concertId,
-          accessToken: session.accessToken,
-        });
-        setWaitingStatus(status);
-        if (status.status === 'READY') {
-          setHoldError(null);
-        }
-      } catch (err) {
-        if (getErrorCode(err) !== 'WAITING_ROOM_NOT_FOUND') {
-          console.error('Failed to poll waiting room:', err);
-        }
-      }
-    }, 5000);
-
-    return () => window.clearInterval(timer);
-  }, [concertId, session, waitingStatus?.status]);
-
-  // Tự động kiểm tra trạng thái thanh toán khi người dùng quay lại tab (sau khi thanh toán ở tab VNPAY mới)
-  useEffect(() => {
-    if (!holdResult || orderSnapshot?.order.status === 'paid' || orderSnapshot?.order.status === 'failed') return;
-
-    const handleFocus = () => {
-      checkPaymentStatus();
-    };
-
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [holdResult?.orderId, orderSnapshot?.order.status]);
-
-  async function getSessionForCheckout() {
+  const getSessionForCheckout = useCallback(async () => {
     if (session) return session;
     router.push(`/login?redirect=${encodeURIComponent(`/concert/${concertId}/booking`)}`);
     throw new Error('Vui lòng đăng nhập để giữ vé.');
-  }
+  }, [concertId, router, session]);
 
-  async function loadHistory(activeSession = session) {
+  const loadHistory = useCallback(async (activeSession = session) => {
     if (!activeSession) return;
     setHistoryLoading(true);
 
@@ -193,9 +144,9 @@ export default function ConcertDetailPage() {
     } finally {
       setHistoryLoading(false);
     }
-  }
+  }, [session]);
 
-  async function prepareWaitingRoom(activeSession: AuthSession) {
+  const prepareWaitingRoom = useCallback(async (activeSession: AuthSession) => {
     if (waitingStatus?.status === 'READY') {
       return waitingStatus.checkoutToken;
     }
@@ -224,7 +175,7 @@ export default function ConcertDetailPage() {
     } finally {
       setWaitingLoading(false);
     }
-  }
+  }, [concertId, waitingStatus]);
 
   async function refreshWaitingRoom() {
     if (!session) return;
@@ -317,7 +268,7 @@ export default function ConcertDetailPage() {
     }
   }
 
-  async function checkPaymentStatus() {
+  const checkPaymentStatus = useCallback(async () => {
     if (!holdResult) return;
 
     setCheckingPayment(true);
@@ -334,7 +285,56 @@ export default function ConcertDetailPage() {
     } finally {
       setCheckingPayment(false);
     }
-  }
+  }, [getSessionForCheckout, holdResult, loadConcert, loadHistory]);
+
+  useEffect(() => {
+    if (concertId) {
+      loadConcert();
+    }
+  }, [concertId, loadConcert]);
+
+  useEffect(() => {
+    if (session) {
+      loadHistory(session);
+    }
+  }, [loadHistory, session]);
+
+  useEffect(() => {
+    if (!session || waitingStatus?.status !== 'WAITING') return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await fetchWaitingRoomStatus({
+          concertId,
+          accessToken: session.accessToken,
+        });
+        setWaitingStatus(status);
+        if (status.status === 'READY') {
+          setHoldError(null);
+        }
+      } catch (err) {
+        if (getErrorCode(err) !== 'WAITING_ROOM_NOT_FOUND') {
+          setHoldError((err as Error).message || 'Khong the kiem tra hang cho.');
+        }
+      }
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [concertId, session, waitingStatus?.status]);
+
+  // Tự động kiểm tra trạng thái thanh toán khi người dùng quay lại tab (sau khi thanh toán ở tab VNPAY mới)
+  useEffect(() => {
+    if (!holdResult || orderSnapshot?.order.status === 'paid' || orderSnapshot?.order.status === 'failed') return;
+
+    const handleFocus = () => {
+      checkPaymentStatus();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [checkPaymentStatus, holdResult, orderSnapshot?.order.status]);
 
   function resetCheckout() {
     resetHoldIdempotencyKey();

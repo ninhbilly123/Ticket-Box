@@ -24,12 +24,13 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { signIn, session, status } = useAuth();
-  const [email, setEmail] = useState('audience@example.com');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const redirect = searchParams.get('redirect') || '/';
+  const requestedRedirect = searchParams.get('redirect');
+  const redirect = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//') ? requestedRedirect : '/';
 
   useEffect(() => {
     if (status === 'authenticated' && session) {
