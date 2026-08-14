@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
@@ -15,7 +13,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -37,6 +34,8 @@ import com.ticketbox.scanner.data.local.SessionStore
 import com.ticketbox.scanner.data.model.AssignedConcert
 import com.ticketbox.scanner.data.model.OfflineScan
 import com.ticketbox.scanner.scanner.CameraQrScanner
+import com.ticketbox.scanner.ui.ScannerUiFactory
+import com.ticketbox.scanner.ui.muted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var offlineScanStore: OfflineScanStore
     private lateinit var apiClient: ApiClient
     private lateinit var qrScanner: CameraQrScanner
+    private lateinit var ui: ScannerUiFactory
 
     private lateinit var root: LinearLayout
     private lateinit var loginPanel: LinearLayout
@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
 
         sessionStore = SessionStore(this)
         offlineScanStore = OfflineScanStore(sessionStore)
+        ui = ScannerUiFactory(this)
         deviceId = sessionStore.deviceId
         accessToken = sessionStore.accessToken
         userId = sessionStore.userId
@@ -112,38 +113,38 @@ class MainActivity : ComponentActivity() {
         }
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(32))
+            setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(32))
             setBackgroundColor(Color.rgb(241, 245, 249))
         }
         scroll.addView(root)
         setContentView(scroll)
 
-        root.addView(text("TicketBox Scanner", 26, true).apply {
+        root.addView(ui.text("TicketBox Scanner", 26, true).apply {
             setTextColor(Color.rgb(15, 23, 42))
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(16), 0, dp(4))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(16), 0, ui.dp(4))
             }
         })
-        root.addView(text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted().apply {
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, dp(16))
+        root.addView(ui.text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted().apply {
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, ui.dp(16))
             }
         })
 
         progressBar = ProgressBar(this).apply {
             visibility = View.GONE
             isIndeterminate = true
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(8), 0, dp(8))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(8), 0, ui.dp(8))
             }
         }
         root.addView(progressBar)
 
-        statusText = text("", 13, false).apply {
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+        statusText = ui.text("", 13, false).apply {
+            setPadding(ui.dp(14), ui.dp(10), ui.dp(14), ui.dp(10))
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(4), 0, dp(16))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(4), 0, ui.dp(16))
             }
         }
         root.addView(statusText)
@@ -153,89 +154,89 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildLoginPanel() {
-        loginPanel = verticalPanel()
-        apiUrlInput = input("API URL, ví dụ: http://192.168.1.5:3000/api/v1", apiClient.baseUrl)
-        emailInput = input("Email nhân viên", "")
-        passwordInput = input("Mật khẩu", "").apply {
+        loginPanel = ui.verticalPanel()
+        apiUrlInput = ui.input("API URL, ví dụ: http://192.168.1.5:3000/api/v1", apiClient.baseUrl)
+        emailInput = ui.input("Email nhân viên", "")
+        passwordInput = ui.input("Mật khẩu", "").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
 
-        loginPanel.addView(label("API base URL"))
+        loginPanel.addView(ui.label("API base URL"))
         loginPanel.addView(apiUrlInput)
-        loginPanel.addView(button("Lưu API URL") { saveApiUrl() })
-        loginPanel.addView(label("Đăng nhập"))
+        loginPanel.addView(ui.button("Lưu API URL") { saveApiUrl() })
+        loginPanel.addView(ui.label("Đăng nhập"))
         loginPanel.addView(emailInput)
         loginPanel.addView(passwordInput)
-        loginPanel.addView(button("Đăng nhập") { login() })
+        loginPanel.addView(ui.button("Đăng nhập") { login() })
         root.addView(loginPanel)
     }
 
     private fun buildScannerPanel() {
-        scannerPanel = verticalPanel()
-        scannerPanel.addView(button("Đăng xuất") { logout() })
-        scannerPanel.addView(label("Sự kiện được phân công"))
+        scannerPanel = ui.verticalPanel()
+        scannerPanel.addView(ui.button("Đăng xuất") { logout() })
+        scannerPanel.addView(ui.label("Sự kiện được phân công"))
 
         concertSpinner = Spinner(this).apply {
-            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = ui.borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
+            setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12))
         }
-        scannerPanel.addView(concertSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(0, dp(4), 0, dp(12))
+        scannerPanel.addView(concertSpinner, LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, ui.dp(4), 0, ui.dp(12))
         })
 
-        scannerPanel.addView(label("Cổng soát vé"))
+        scannerPanel.addView(ui.label("Cổng soát vé"))
         gateSpinner = Spinner(this).apply {
-            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = ui.borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
+            setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12))
         }
-        scannerPanel.addView(gateSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(0, dp(4), 0, dp(12))
+        scannerPanel.addView(gateSpinner, LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, ui.dp(4), 0, ui.dp(12))
         })
 
-        scannerPanel.addView(button("Tải lại phân công") { loadAssignedConcerts() })
+        scannerPanel.addView(ui.button("Tải lại phân công") { loadAssignedConcerts() })
 
-        resultText = text("", 15, true).apply { visibility = View.GONE }
+        resultText = ui.text("", 15, true).apply { visibility = View.GONE }
         scannerPanel.addView(resultText)
 
-        manualCodeInput = input("Dán QR token hoặc mã vé", "")
-        scannerPanel.addView(label("Nhập mã thủ công"))
+        manualCodeInput = ui.input("Dán QR token hoặc mã vé", "")
+        scannerPanel.addView(ui.label("Nhập mã thủ công"))
         scannerPanel.addView(manualCodeInput)
-        scannerPanel.addView(button("Soát vé thủ công") { submitManualCode() })
-        scannerPanel.addView(button("Mở camera quét QR") { openCamera() })
-        scannerPanel.addView(button("Đóng camera") { stopCamera() })
+        scannerPanel.addView(ui.button("Soát vé thủ công") { submitManualCode() })
+        scannerPanel.addView(ui.button("Mở camera quét QR") { openCamera() })
+        scannerPanel.addView(ui.button("Đóng camera") { stopCamera() })
 
-        cameraContainer = verticalPanel().apply {
+        cameraContainer = ui.verticalPanel().apply {
             visibility = View.GONE
-            setPadding(dp(4), dp(4), dp(4), dp(4))
+            setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4))
         }
         previewView = PreviewView(this)
-        cameraContainer.addView(previewView, ViewGroup.LayoutParams(matchParent(), dp(320)))
+        cameraContainer.addView(previewView, ViewGroup.LayoutParams(ui.matchParent(), ui.dp(320)))
         scannerPanel.addView(cameraContainer)
 
-        queueText = text("", 13, false).apply {
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = filledBackground(Color.rgb(241, 245, 249))
+        queueText = ui.text("", 13, false).apply {
+            setPadding(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(8))
+            background = ui.filledBackground(Color.rgb(241, 245, 249))
             setTextColor(Color.rgb(71, 85, 105))
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(12), 0, dp(12))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(12), 0, ui.dp(12))
             }
         }
         scannerPanel.addView(queueText)
 
-        conflictListText = text("", 13, false).apply {
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
+        conflictListText = ui.text("", 13, false).apply {
+            setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12))
+            background = ui.borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
             setTextColor(Color.rgb(185, 28, 28))
             gravity = Gravity.LEFT
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(8), 0, dp(12))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(8), 0, ui.dp(12))
             }
             visibility = View.GONE
         }
         scannerPanel.addView(conflictListText)
-        scannerPanel.addView(button("Đồng bộ lượt ngoại tuyến") { syncOfflineQueue() })
-        scannerPanel.addView(button("Dọn lượt đã đồng bộ") { clearResolvedQueue() })
+        scannerPanel.addView(ui.button("Đồng bộ lượt ngoại tuyến") { syncOfflineQueue() })
+        scannerPanel.addView(ui.button("Dọn lượt đã đồng bộ") { clearResolvedQueue() })
         root.addView(scannerPanel)
     }
 
@@ -256,7 +257,7 @@ class MainActivity : ComponentActivity() {
         } else {
             Pair(Color.rgb(254, 243, 199), Color.rgb(180, 83, 9))
         }
-        statusText.background = filledBackground(bgCol)
+        statusText.background = ui.filledBackground(bgCol)
         statusText.setTextColor(txtCol)
         renderQueue()
     }
@@ -420,12 +421,12 @@ class MainActivity : ComponentActivity() {
         resultText.apply {
             text = resultMsg
             setTextColor(txtCol)
-            background = borderedBackground(bgCol, strokeCol)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = ui.borderedBackground(bgCol, strokeCol)
+            setPadding(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(14))
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.VISIBLE
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(12), 0, dp(16))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(12), 0, ui.dp(16))
             }
         }
     }
@@ -434,8 +435,8 @@ class MainActivity : ComponentActivity() {
         resultText.apply {
             text = message
             setTextColor(Color.rgb(185, 28, 28))
-            background = borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = ui.borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
+            setPadding(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(14))
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.VISIBLE
         }
@@ -466,8 +467,8 @@ class MainActivity : ComponentActivity() {
         resultText.apply {
             text = "Đã lưu lượt quét vào hàng đợi ngoại tuyến."
             setTextColor(Color.rgb(180, 83, 9))
-            background = borderedBackground(Color.rgb(254, 243, 199), Color.rgb(252, 211, 77))
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = ui.borderedBackground(Color.rgb(254, 243, 199), Color.rgb(252, 211, 77))
+            setPadding(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(14))
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.VISIBLE
         }
@@ -603,102 +604,6 @@ class MainActivity : ComponentActivity() {
     private fun toast(message: String) {
         runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
     }
-
-    private fun text(value: String, size: Int, bold: Boolean): TextView {
-        return TextView(this).apply {
-            text = value
-            textSize = size.toFloat()
-            setTextColor(Color.rgb(15, 23, 42))
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(4), 0, dp(4))
-        }
-    }
-
-    private fun TextView.muted(): TextView {
-        setTextColor(Color.rgb(100, 116, 139))
-        return this
-    }
-
-    private fun label(value: String): TextView {
-        return text(value, 13, true).apply {
-            setTextColor(Color.rgb(71, 85, 105))
-            setPadding(0, dp(10), 0, dp(4))
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(8), 0, 0)
-            }
-        }
-    }
-
-    private fun input(hintValue: String, defaultValue: String): EditText {
-        return EditText(this).apply {
-            hint = hintValue
-            setText(defaultValue)
-            textSize = 14f
-            setSingleLine(true)
-            setTextColor(Color.rgb(15, 23, 42))
-            setHintTextColor(Color.rgb(148, 163, 184))
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(4), 0, dp(10))
-            }
-        }
-    }
-
-    private fun button(label: String, action: () -> Unit): Button {
-        return Button(this).apply {
-            text = label
-            setAllCaps(false)
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            val (bgColor, textColor) = when (label) {
-                "Đăng xuất", "Đóng camera" -> Pair(Color.rgb(239, 68, 68), Color.WHITE)
-                "Dọn lượt đã đồng bộ", "Tải lại phân công" -> Pair(Color.rgb(226, 232, 240), Color.rgb(71, 85, 105))
-                else -> Pair(Color.rgb(79, 70, 229), Color.WHITE)
-            }
-            setTextColor(textColor)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = filledBackground(bgColor)
-            elevation = dp(2).toFloat()
-            setOnClickListener { action() }
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(6), 0, dp(10))
-            }
-        }
-    }
-
-    private fun verticalPanel(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20), dp(20), dp(20), dp(20))
-            background = borderedBackground(Color.WHITE, Color.rgb(226, 232, 240))
-            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, dp(12), 0, dp(12))
-            }
-        }
-    }
-
-    private fun filledBackground(color: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(8).toFloat()
-            setColor(color)
-        }
-    }
-
-    private fun borderedBackground(fillColor: Int, strokeColor: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(8).toFloat()
-            setColor(fillColor)
-            setStroke(dp(1), strokeColor)
-        }
-    }
-
-    private fun matchParent() = ViewGroup.LayoutParams.MATCH_PARENT
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
         const val MAX_OFFLINE_QUEUE_SIZE = 500
