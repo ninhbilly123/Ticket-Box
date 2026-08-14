@@ -2,14 +2,14 @@ package com.ticketbox.scanner
 
 import android.Manifest
 import android.content.Context
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -25,34 +25,30 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
+import com.ticketbox.scanner.data.api.ApiClient
+import com.ticketbox.scanner.data.api.ApiException
+import com.ticketbox.scanner.data.api.NetworkException
+import com.ticketbox.scanner.data.api.normalizeBaseUrl
+import com.ticketbox.scanner.data.local.OfflineScanStore
+import com.ticketbox.scanner.data.local.SessionStore
+import com.ticketbox.scanner.data.model.AssignedConcert
+import com.ticketbox.scanner.data.model.OfflineScan
+import com.ticketbox.scanner.scanner.CameraQrScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URL
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
-    private lateinit var prefs: SharedPreferences
+    private lateinit var sessionStore: SessionStore
+    private lateinit var offlineScanStore: OfflineScanStore
     private lateinit var apiClient: ApiClient
+    private lateinit var qrScanner: CameraQrScanner
 
     private lateinit var root: LinearLayout
     private lateinit var loginPanel: LinearLayout
@@ -71,15 +67,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraContainer: LinearLayout
     private lateinit var previewView: PreviewView
 
-    private val scanner = BarcodeScanning.getClient()
-    private val cameraExecutor = Executors.newSingleThreadExecutor()
-    private var scanLocked = false
-    private var cameraActive = false
-
     private var accessToken: String? = null
     private var userId: String? = null
     private var deviceId: String = ""
-    private var concerts: MutableList<AssignedConcert> = mutableListOf()
+    private var concerts: List<AssignedConcert> = emptyList()
     private var selectedConcert: AssignedConcert? = null
     private var selectedGateId: String? = null
     private var offlineQueue: MutableList<OfflineScan> = mutableListOf()
@@ -92,15 +83,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = getSharedPreferences("ticketbox_scanner_native", Context.MODE_PRIVATE)
-        deviceId = prefs.getString("deviceId", null) ?: "android-${UUID.randomUUID().toString().take(8)}"
-        prefs.edit().putString("deviceId", deviceId).apply()
-        apiClient = ApiClient(prefs.getString("apiBaseUrl", "http://192.168.1.5:3000/api/v1")!!)
-        accessToken = prefs.getString("accessToken", null)
-        userId = prefs.getString("userId", null)
-        offlineQueue = loadOfflineQueue()
+
+        sessionStore = SessionStore(this)
+        offlineScanStore = OfflineScanStore(sessionStore)
+        deviceId = sessionStore.deviceId
+        accessToken = sessionStore.accessToken
+        userId = sessionStore.userId
+        apiClient = ApiClient(sessionStore.apiBaseUrl)
+        offlineQueue = offlineScanStore.load()
 
         buildUi()
+        qrScanner = CameraQrScanner(this, previewView) { code -> submitScan(code) }
         renderSession()
 
         if (accessToken != null) {
@@ -110,12 +103,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown()
+        qrScanner.release()
     }
 
     private fun buildUi() {
         val scroll = ScrollView(this).apply {
-            setBackgroundColor(Color.rgb(241, 245, 249)) // Slate 100 background
+            setBackgroundColor(Color.rgb(241, 245, 249))
         }
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -125,34 +118,22 @@ class MainActivity : ComponentActivity() {
         scroll.addView(root)
         setContentView(scroll)
 
-        val titleView = text("TicketBox Scanner", 26, true).apply {
-            setTextColor(Color.rgb(15, 23, 42)) // Slate 900
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+        root.addView(text("TicketBox Scanner", 26, true).apply {
+            setTextColor(Color.rgb(15, 23, 42))
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(16), 0, dp(4))
             }
-        }
-        root.addView(titleView)
-        
-        val subtitleView = text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted().apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+        })
+        root.addView(text("Ứng dụng Android native cho nhân viên soát vé.", 14, false).muted().apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, 0, 0, dp(16))
             }
-        }
-        root.addView(subtitleView)
+        })
 
         progressBar = ProgressBar(this).apply {
             visibility = View.GONE
             isIndeterminate = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(8), 0, dp(8))
             }
         }
@@ -161,19 +142,24 @@ class MainActivity : ComponentActivity() {
         statusText = text("", 13, false).apply {
             setPadding(dp(14), dp(10), dp(14), dp(10))
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(4), 0, dp(16))
             }
         }
         root.addView(statusText)
 
+        buildLoginPanel()
+        buildScannerPanel()
+    }
+
+    private fun buildLoginPanel() {
         loginPanel = verticalPanel()
         apiUrlInput = input("API URL, ví dụ: http://192.168.1.5:3000/api/v1", apiClient.baseUrl)
-        emailInput = input("Email nhân viên", "staff@example.com")
-        passwordInput = input("Mật khẩu", "Password123!")
+        emailInput = input("Email nhân viên", "")
+        passwordInput = input("Mật khẩu", "").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+
         loginPanel.addView(label("API base URL"))
         loginPanel.addView(apiUrlInput)
         loginPanel.addView(button("Lưu API URL") { saveApiUrl() })
@@ -182,22 +168,15 @@ class MainActivity : ComponentActivity() {
         loginPanel.addView(passwordInput)
         loginPanel.addView(button("Đăng nhập") { login() })
         root.addView(loginPanel)
+    }
 
+    private fun buildScannerPanel() {
         scannerPanel = verticalPanel()
         scannerPanel.addView(button("Đăng xuất") { logout() })
         scannerPanel.addView(label("Sự kiện được phân công"))
-        
-        val spinnerBg = {
-            GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(Color.rgb(248, 250, 252))
-                setStroke(dp(1), Color.rgb(226, 232, 240))
-            }
-        }
 
         concertSpinner = Spinner(this).apply {
-            background = spinnerBg()
+            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         scannerPanel.addView(concertSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -206,7 +185,7 @@ class MainActivity : ComponentActivity() {
 
         scannerPanel.addView(label("Cổng soát vé"))
         gateSpinner = Spinner(this).apply {
-            background = spinnerBg()
+            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         scannerPanel.addView(gateSpinner, LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -215,9 +194,7 @@ class MainActivity : ComponentActivity() {
 
         scannerPanel.addView(button("Tải lại phân công") { loadAssignedConcerts() })
 
-        resultText = text("", 15, true).apply {
-            visibility = View.GONE
-        }
+        resultText = text("", 15, true).apply { visibility = View.GONE }
         scannerPanel.addView(resultText)
 
         manualCodeInput = input("Dán QR token hoặc mã vé", "")
@@ -227,8 +204,8 @@ class MainActivity : ComponentActivity() {
         scannerPanel.addView(button("Mở camera quét QR") { openCamera() })
         scannerPanel.addView(button("Đóng camera") { stopCamera() })
 
-        cameraContainer = verticalPanel().apply { 
-            visibility = View.GONE 
+        cameraContainer = verticalPanel().apply {
+            visibility = View.GONE
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         previewView = PreviewView(this)
@@ -237,18 +214,10 @@ class MainActivity : ComponentActivity() {
 
         queueText = text("", 13, false).apply {
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            val badgeBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(Color.rgb(241, 245, 249))
-            }
-            background = badgeBg
+            background = filledBackground(Color.rgb(241, 245, 249))
             setTextColor(Color.rgb(71, 85, 105))
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(12), 0, dp(12))
             }
         }
@@ -256,19 +225,10 @@ class MainActivity : ComponentActivity() {
 
         conflictListText = text("", 13, false).apply {
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            val conflictBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(10).toFloat()
-                setColor(Color.rgb(254, 242, 242))
-                setStroke(dp(1), Color.rgb(254, 202, 202))
-            }
-            background = conflictBg
+            background = borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
             setTextColor(Color.rgb(185, 28, 28))
             gravity = Gravity.LEFT
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(8), 0, dp(12))
             }
             visibility = View.GONE
@@ -283,43 +243,40 @@ class MainActivity : ComponentActivity() {
         val loggedIn = accessToken != null
         loginPanel.visibility = if (loggedIn) View.GONE else View.VISIBLE
         scannerPanel.visibility = if (loggedIn) View.VISIBLE else View.GONE
+
+        val online = isOnline()
         statusText.text = if (loggedIn) {
-            "Đã đăng nhập. Thiết bị: $deviceId. Mạng: ${if (isOnline()) "trực tuyến" else "ngoại tuyến"}"
+            "Đã đăng nhập. Thiết bị: $deviceId. Mạng: ${if (online) "trực tuyến" else "ngoại tuyến"}"
         } else {
             "Chưa đăng nhập. Hãy nhập API URL bằng IP LAN của laptop."
         }
-        
-        val isOnline = isOnline()
-        val (bgCol, txtCol) = if (isOnline) {
-            Pair(Color.rgb(220, 252, 231), Color.rgb(21, 128, 61)) // Green 100, Green 700
+
+        val (bgCol, txtCol) = if (online) {
+            Pair(Color.rgb(220, 252, 231), Color.rgb(21, 128, 61))
         } else {
-            Pair(Color.rgb(254, 243, 199), Color.rgb(180, 83, 9)) // Yellow 100, Yellow 700
+            Pair(Color.rgb(254, 243, 199), Color.rgb(180, 83, 9))
         }
-        val statusBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(8).toFloat()
-            setColor(bgCol)
-        }
-        statusText.background = statusBg
+        statusText.background = filledBackground(bgCol)
         statusText.setTextColor(txtCol)
-        
         renderQueue()
     }
 
-    private fun saveApiUrl() {
+    private fun saveApiUrl(): Boolean {
         try {
             val normalized = normalizeBaseUrl(apiUrlInput.text.toString())
             apiClient = ApiClient(normalized)
             apiUrlInput.setText(normalized)
-            prefs.edit().putString("apiBaseUrl", normalized).apply()
+            sessionStore.apiBaseUrl = normalized
             toast("Đã lưu API URL.")
+            return true
         } catch (error: Exception) {
             toast(error.message ?: "API URL không hợp lệ.")
+            return false
         }
     }
 
     private fun login() {
-        saveApiUrl()
+        if (!saveApiUrl()) return
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
         if (email.isBlank() || password.isBlank()) {
@@ -328,20 +285,14 @@ class MainActivity : ComponentActivity() {
         }
 
         launchBusy {
-            val body = JSONObject()
-                .put("email", email)
-                .put("password", password)
-            val data = apiClient.request("/auth/login", "POST", body, null) as JSONObject
-            val user = data.getJSONObject("user")
-            if (user.getString("role") != "CHECKIN_STAFF") {
-                throw IllegalStateException("Tài khoản này không có quyền soát vé.")
+            val session = apiClient.login(email, password)
+            if (session.role != "CHECKIN_STAFF") {
+                throw ApiException(403, "Tài khoản này không có quyền soát vé.")
             }
-            accessToken = data.getString("accessToken")
-            userId = user.getString("id")
-            prefs.edit()
-                .putString("accessToken", accessToken)
-                .putString("userId", userId)
-                .apply()
+            accessToken = session.accessToken
+            userId = session.userId
+            sessionStore.accessToken = session.accessToken
+            sessionStore.userId = session.userId
             withContext(Dispatchers.Main) {
                 renderSession()
                 loadAssignedConcerts()
@@ -353,35 +304,21 @@ class MainActivity : ComponentActivity() {
         stopCamera()
         accessToken = null
         userId = null
-        concerts.clear()
+        concerts = emptyList()
         selectedConcert = null
         selectedGateId = null
-        prefs.edit().remove("accessToken").remove("userId").apply()
+        sessionStore.clearSession()
         renderSession()
     }
 
     private fun loadAssignedConcerts() {
         val token = accessToken ?: return
         launchBusy {
-            val data = apiClient.request("/checkins/concerts", "GET", null, token) as JSONArray
-            val nextConcerts = mutableListOf<AssignedConcert>()
-            for (index in 0 until data.length()) {
-                val item = data.getJSONObject(index)
-                val gateIds = item.optJSONArray("gateIds") ?: JSONArray()
-                nextConcerts.add(
-                    AssignedConcert(
-                        id = item.getString("id"),
-                        name = item.optString("name", "Concert"),
-                        venue = item.optString("venue", ""),
-                        startAt = item.optString("startAt", ""),
-                        gateIds = (0 until gateIds.length()).map { gateIds.getString(it) }
-                    )
-                )
-            }
-            concerts = nextConcerts
-            selectedConcert = concerts.firstOrNull()
-            selectedGateId = selectedConcert?.gateIds?.firstOrNull()
+            val nextConcerts = apiClient.listAssignedConcerts(token)
             withContext(Dispatchers.Main) {
+                concerts = nextConcerts
+                selectedConcert = concerts.firstOrNull()
+                selectedGateId = selectedConcert?.gateIds?.firstOrNull()
                 renderConcertSpinners()
                 toast("Đã tải ${concerts.size} sự kiện.")
             }
@@ -422,32 +359,34 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun submitScan(rawCode: String) {
-        val ticketId = rawCode.trim()
+        val qrCode = rawCode.trim()
         val concertId = selectedConcert?.id
         val gateId = selectedGateId
         val token = accessToken
-        if (ticketId.isBlank() || concertId.isNullOrBlank() || gateId.isNullOrBlank() || token == null) {
+        if (qrCode.isBlank() || concertId.isNullOrBlank() || gateId.isNullOrBlank() || token == null) {
             toast("Cần chọn sự kiện/cổng soát vé và nhập mã vé.")
             return
         }
 
         if (!isOnline()) {
-            enqueueOffline(ticketId, "Thiết bị đang ngoại tuyến.")
+            enqueueOffline(qrCode, "Thiết bị đang ngoại tuyến.")
             return
         }
 
         launchBusy {
             try {
-                val body = JSONObject()
-                    .put("ticketId", ticketId)
-                    .put("concertId", concertId)
-                    .put("gateId", gateId)
-                    .put("deviceId", deviceId)
-                    .put("scannedAtLocal", Instant.now().toString())
-                val data = apiClient.request("/checkins/scan", "POST", body, token) as JSONObject
+                val data = apiClient.scanTicket(
+                    token = token,
+                    concertId = concertId,
+                    qrCode = qrCode,
+                    deviceId = deviceId,
+                    scannedAt = Instant.now().toString()
+                )
                 withContext(Dispatchers.Main) { renderScanResult(data) }
-            } catch (error: Exception) {
-                enqueueOffline(ticketId, error.message ?: "Không kết nối được với backend.")
+            } catch (error: NetworkException) {
+                withContext(Dispatchers.Main) {
+                    enqueueOffline(qrCode, error.message ?: "Không kết nối được backend.")
+                }
             }
         }
     }
@@ -463,6 +402,7 @@ class MainActivity : ComponentActivity() {
             "INVALID_SCAN_TIME" -> "Thời gian quét không hợp lệ."
             else -> "Vé không hợp lệ."
         }
+
         val customer = data.optJSONObject("customer")
         if (customer != null) {
             val name = customer.optString("name")
@@ -473,31 +413,31 @@ class MainActivity : ComponentActivity() {
         }
 
         val (bgCol, strokeCol, txtCol) = if (status == "VALID") {
-            Triple(Color.rgb(240, 253, 250), Color.rgb(187, 247, 208), Color.rgb(21, 128, 61)) // Light green, light border, dark green text
+            Triple(Color.rgb(240, 253, 250), Color.rgb(187, 247, 208), Color.rgb(21, 128, 61))
         } else {
-            Triple(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202), Color.rgb(185, 28, 28)) // Light red, light border, dark red text
+            Triple(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202), Color.rgb(185, 28, 28))
         }
-
-        val resultBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(10).toFloat()
-            setColor(bgCol)
-            setStroke(dp(1), strokeCol)
-        }
-
         resultText.apply {
             text = resultMsg
             setTextColor(txtCol)
-            background = resultBg
+            background = borderedBackground(bgCol, strokeCol)
             setPadding(dp(16), dp(14), dp(16), dp(14))
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.VISIBLE
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(12), 0, dp(16))
             }
+        }
+    }
+
+    private fun renderError(message: String) {
+        resultText.apply {
+            text = message
+            setTextColor(Color.rgb(185, 28, 28))
+            background = borderedBackground(Color.rgb(254, 242, 242), Color.rgb(254, 202, 202))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.VISIBLE
         }
     }
 
@@ -519,23 +459,32 @@ class MainActivity : ComponentActivity() {
                 lastError = reason
             )
         )
-        saveOfflineQueue()
-        runOnUiThread {
-            resultText.text = "Đã lưu lượt quét vào hàng đợi ngoại tuyến."
-            resultText.setTextColor(Color.rgb(180, 83, 9))
-            renderQueue()
+        if (offlineQueue.size > MAX_OFFLINE_QUEUE_SIZE) {
+            offlineQueue = offlineQueue.take(MAX_OFFLINE_QUEUE_SIZE).toMutableList()
         }
+        offlineScanStore.save(offlineQueue)
+        resultText.apply {
+            text = "Đã lưu lượt quét vào hàng đợi ngoại tuyến."
+            setTextColor(Color.rgb(180, 83, 9))
+            background = borderedBackground(Color.rgb(254, 243, 199), Color.rgb(252, 211, 77))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.VISIBLE
+        }
+        renderQueue()
     }
 
     private fun syncOfflineQueue() {
         val token = accessToken ?: return
         val concertId = selectedConcert?.id ?: return
         val gateId = selectedGateId ?: return
+        val staffId = userId ?: return
         val pending = offlineQueue.filter {
             it.syncStatus == "PENDING" &&
                 it.concertId == concertId &&
+                it.gateId == gateId &&
                 it.deviceId == deviceId &&
-                it.staffId == userId
+                it.staffId == staffId
         }
         if (pending.isEmpty()) {
             toast("Không có lượt quét ngoại tuyến cần đồng bộ.")
@@ -543,82 +492,66 @@ class MainActivity : ComponentActivity() {
         }
 
         launchBusy {
-            val logs = JSONArray()
-            pending.forEach {
-                logs.put(JSONObject().put("ticketId", it.ticketId).put("scannedAtLocal", it.scannedAtLocal))
-            }
-            val body = JSONObject()
-                .put("concertId", concertId)
-                .put("gateId", gateId)
-                .put("deviceId", deviceId)
-                .put("logs", logs)
-            val data = apiClient.request("/checkins/sync", "POST", body, token) as JSONObject
-            val conflicts = mutableMapOf<String, JSONObject>()
-            val conflictArray = data.optJSONArray("conflicts") ?: JSONArray()
-            for (index in 0 until conflictArray.length()) {
-                val item = conflictArray.getJSONObject(index)
-                conflicts["${item.getString("ticketId")}|${item.getString("scannedAtLocal")}"] = item
-            }
-
+            val result = apiClient.syncOfflineScans(token, concertId, deviceId, pending)
             offlineQueue = offlineQueue.map { item ->
                 if (pending.none { it.localId == item.localId }) {
                     item
                 } else {
-                    val conflictItem = conflicts["${item.ticketId}|${item.scannedAtLocal}"]
-                    if (conflictItem == null) {
+                    val conflict = result.conflicts["${item.ticketId}|${item.scannedAtLocal}"]
+                    if (conflict == null) {
                         item.copy(syncStatus = "SYNCED", lastError = null)
                     } else {
-                        val reason = conflictItem.optString("reason", "Conflict")
-                        val cust = conflictItem.optJSONObject("customer")
+                        val customer = conflict.customer
                         item.copy(
                             syncStatus = "CONFLICT",
-                            lastError = reason,
-                            customerName = cust?.optString("name"),
-                            customerEmail = cust?.optString("email"),
-                            customerPhone = cust?.optString("phone"),
-                            customerCompany = cust?.optString("company")
+                            lastError = conflict.reason,
+                            customerName = customer?.optString("name"),
+                            customerEmail = customer?.optString("email"),
+                            customerPhone = customer?.optString("phone"),
+                            customerCompany = customer?.optString("company")
                         )
                     }
                 }
             }.toMutableList()
-            saveOfflineQueue()
+            offlineScanStore.save(offlineQueue)
 
             withContext(Dispatchers.Main) {
                 renderQueue()
-                toast("Đồng bộ xong: ${data.optInt("syncedCount")} thành công, ${data.optInt("conflictCount")} xung đột.")
+                toast("Đồng bộ xong: ${result.syncedCount} thành công, ${result.conflictCount} xung đột.")
             }
         }
     }
 
     private fun clearResolvedQueue() {
         offlineQueue = offlineQueue.filter { it.syncStatus == "PENDING" || it.syncStatus == "CONFLICT" }.toMutableList()
-        saveOfflineQueue()
+        offlineScanStore.save(offlineQueue)
         renderQueue()
     }
 
     private fun renderQueue() {
         val pending = offlineQueue.count { it.syncStatus == "PENDING" }
         val conflict = offlineQueue.count { it.syncStatus == "CONFLICT" }
-        queueText.text = "Hàng đợi ngoại tuyến: Đang chờ $pending lượt, xung đột $conflict lượt."
+        queueText.text = "Hàng đợi ngoại tuyến: đang chờ $pending lượt, xung đột $conflict lượt."
 
         val conflicts = offlineQueue.filter { it.syncStatus == "CONFLICT" }
         if (conflicts.isEmpty()) {
             conflictListText.visibility = View.GONE
             conflictListText.text = ""
-        } else {
-            conflictListText.visibility = View.VISIBLE
-            val sb = java.lang.StringBuilder("Chi tiết vé xung đột:\n")
-            conflicts.forEachIndexed { idx, item ->
-                sb.append("${idx + 1}. Vé: ${item.ticketId}\n")
-                if (item.customerName != null) {
-                    val company = item.customerCompany
-                    val vipStr = if (!company.isNullOrBlank() && company != "null") " (VIP - $company)" else ""
-                    sb.append("   Khách: ${item.customerName} (${item.customerEmail ?: "N/A"})$vipStr\n")
-                }
-                sb.append("   Lỗi: ${item.lastError ?: "Không rõ lý do"}\n")
-            }
-            conflictListText.text = sb.toString()
+            return
         }
+
+        conflictListText.visibility = View.VISIBLE
+        val details = StringBuilder("Chi tiết vé xung đột:\n")
+        conflicts.forEachIndexed { idx, item ->
+            details.append("${idx + 1}. Vé: ${item.ticketId}\n")
+            if (item.customerName != null) {
+                val company = item.customerCompany
+                val vipStr = if (!company.isNullOrBlank() && company != "null") " (VIP - $company)" else ""
+                details.append("   Khách: ${item.customerName} (${item.customerEmail ?: "N/A"})$vipStr\n")
+            }
+            details.append("   Lỗi: ${item.lastError ?: "Không rõ lý do"}\n")
+        }
+        conflictListText.text = details.toString()
     }
 
     private fun openCamera() {
@@ -630,103 +563,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
-        cameraActive = true
         cameraContainer.visibility = View.VISIBLE
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor) { imageProxy -> analyzeImage(imageProxy) }
-                }
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
-        }, ContextCompat.getMainExecutor(this))
+        qrScanner.start()
     }
 
     private fun stopCamera() {
-        cameraActive = false
         cameraContainer.visibility = View.GONE
-        ProcessCameraProvider.getInstance(this).get().unbindAll()
-    }
-
-    @OptIn(ExperimentalGetImage::class)
-    private fun analyzeImage(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image
-        if (mediaImage == null || scanLocked || !cameraActive) {
-            imageProxy.close()
-            return
-        }
-
-        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        scanner.process(image)
-            .addOnSuccessListener { barcodes ->
-                val raw = barcodes.firstOrNull()?.rawValue
-                if (!raw.isNullOrBlank() && !scanLocked) {
-                    scanLocked = true
-                    runOnUiThread {
-                        stopCamera()
-                        submitScan(raw)
-                        scanLocked = false
-                    }
-                }
-            }
-            .addOnCompleteListener { imageProxy.close() }
-    }
-
-    private fun loadOfflineQueue(): MutableList<OfflineScan> {
-        val raw = prefs.getString("offlineQueue", "[]") ?: "[]"
-        val array = JSONArray(raw)
-        val result = mutableListOf<OfflineScan>()
-        for (index in 0 until array.length()) {
-            val item = array.getJSONObject(index)
-            result.add(
-                OfflineScan(
-                    localId = item.getString("localId"),
-                    ticketId = item.getString("ticketId"),
-                    concertId = item.getString("concertId"),
-                    gateId = item.getString("gateId"),
-                    deviceId = item.getString("deviceId"),
-                    staffId = item.getString("staffId"),
-                    scannedAtLocal = item.getString("scannedAtLocal"),
-                    syncStatus = item.getString("syncStatus"),
-                    lastError = item.optString("lastError").ifBlank { null },
-                    customerName = item.optString("customerName").ifBlank { null },
-                    customerEmail = item.optString("customerEmail").ifBlank { null },
-                    customerPhone = item.optString("customerPhone").ifBlank { null },
-                    customerCompany = item.optString("customerCompany").ifBlank { null }
-                )
-            )
-        }
-        return result
-    }
-
-    private fun saveOfflineQueue() {
-        val array = JSONArray()
-        offlineQueue.forEach {
-            array.put(
-                JSONObject()
-                    .put("localId", it.localId)
-                    .put("ticketId", it.ticketId)
-                    .put("concertId", it.concertId)
-                    .put("gateId", it.gateId)
-                    .put("deviceId", it.deviceId)
-                    .put("staffId", it.staffId)
-                    .put("scannedAtLocal", it.scannedAtLocal)
-                    .put("syncStatus", it.syncStatus)
-                    .put("lastError", it.lastError)
-                    .put("customerName", it.customerName)
-                    .put("customerEmail", it.customerEmail)
-                    .put("customerPhone", it.customerPhone)
-                    .put("customerCompany", it.customerCompany)
-            )
-        }
-        prefs.edit().putString("offlineQueue", array.toString()).apply()
+        qrScanner.stop()
     }
 
     private fun launchBusy(block: suspend () -> Unit) {
@@ -734,8 +577,15 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) { block() }
+            } catch (error: ApiException) {
+                if (error.statusCode == 401 || error.statusCode == 403) {
+                    logout()
+                }
+                renderError(error.message)
+            } catch (error: NetworkException) {
+                renderError(error.message ?: "Không kết nối được backend.")
             } catch (error: Exception) {
-                toast(error.message ?: "Có lỗi xảy ra.")
+                renderError(error.message ?: "Có lỗi xảy ra.")
             } finally {
                 progressBar.visibility = View.GONE
                 renderSession()
@@ -748,19 +598,6 @@ class MainActivity : ComponentActivity() {
         val network = manager.activeNetwork ?: return false
         val capabilities = manager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-    private fun normalizeBaseUrl(raw: String): String {
-        var value = raw.trim()
-        if (value.isBlank()) throw IllegalArgumentException("Vui lòng nhập API URL.")
-        value = value.replace(Regex("^http:/*", RegexOption.IGNORE_CASE), "http://")
-        value = value.replace(Regex("^https:/*", RegexOption.IGNORE_CASE), "https://")
-        if (!value.startsWith("http://", true) && !value.startsWith("https://", true)) {
-            value = "http://$value"
-        }
-        value = value.trimEnd('/')
-        URL(value)
-        return value
     }
 
     private fun toast(message: String) {
@@ -778,18 +615,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun TextView.muted(): TextView {
-        setTextColor(Color.rgb(100, 116, 139)) // Slate 500
+        setTextColor(Color.rgb(100, 116, 139))
         return this
     }
 
     private fun label(value: String): TextView {
         return text(value, 13, true).apply {
-            setTextColor(Color.rgb(71, 85, 105)) // Slate 600
+            setTextColor(Color.rgb(71, 85, 105))
             setPadding(0, dp(10), 0, dp(4))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(8), 0, 0)
             }
         }
@@ -804,19 +638,8 @@ class MainActivity : ComponentActivity() {
             setTextColor(Color.rgb(15, 23, 42))
             setHintTextColor(Color.rgb(148, 163, 184))
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            
-            val inputBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(Color.rgb(248, 250, 252))
-                setStroke(dp(1), Color.rgb(226, 232, 240))
-            }
-            background = inputBg
-            
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            background = borderedBackground(Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(4), 0, dp(10))
             }
         }
@@ -828,30 +651,17 @@ class MainActivity : ComponentActivity() {
             setAllCaps(false)
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            
             val (bgColor, textColor) = when (label) {
-                "Đăng xuất", "Đóng camera" -> Pair(Color.rgb(239, 68, 68), Color.WHITE) // Red 500
-                "Dọn lượt đã đồng bộ", "Tải lại phân công" -> Pair(Color.rgb(226, 232, 240), Color.rgb(71, 85, 105)) // Slate 200, Slate 600
-                else -> Pair(Color.rgb(79, 70, 229), Color.WHITE) // Indigo 600
+                "Đăng xuất", "Đóng camera" -> Pair(Color.rgb(239, 68, 68), Color.WHITE)
+                "Dọn lượt đã đồng bộ", "Tải lại phân công" -> Pair(Color.rgb(226, 232, 240), Color.rgb(71, 85, 105))
+                else -> Pair(Color.rgb(79, 70, 229), Color.WHITE)
             }
-            
             setTextColor(textColor)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            
-            val btnBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(bgColor)
-            }
-            background = btnBg
-            
+            background = filledBackground(bgColor)
             elevation = dp(2).toFloat()
             setOnClickListener { action() }
-            
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(6), 0, dp(10))
             }
         }
@@ -862,86 +672,35 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(20), dp(20), dp(20), dp(20))
-            
-            val cardBg = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(16).toFloat()
-                setColor(Color.WHITE)
-                setStroke(dp(1), Color.rgb(226, 232, 240))
-            }
-            background = cardBg
-            
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
+            background = borderedBackground(Color.WHITE, Color.rgb(226, 232, 240))
+            layoutParams = LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, dp(12), 0, dp(12))
             }
         }
     }
 
-    private fun matchWrap(): LinearLayout.LayoutParams {
-        return LinearLayout.LayoutParams(matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT)
+    private fun filledBackground(color: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(color)
+        }
+    }
+
+    private fun borderedBackground(fillColor: Int, strokeColor: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(fillColor)
+            setStroke(dp(1), strokeColor)
+        }
     }
 
     private fun matchParent() = ViewGroup.LayoutParams.MATCH_PARENT
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-}
 
-data class AssignedConcert(
-    val id: String,
-    val name: String,
-    val venue: String,
-    val startAt: String,
-    val gateIds: List<String>
-)
-
-data class OfflineScan(
-    val localId: String,
-    val ticketId: String,
-    val concertId: String,
-    val gateId: String,
-    val deviceId: String,
-    val staffId: String,
-    val scannedAtLocal: String,
-    val syncStatus: String,
-    val lastError: String?,
-    val customerName: String? = null,
-    val customerEmail: String? = null,
-    val customerPhone: String? = null,
-    val customerCompany: String? = null
-)
-
-class ApiClient(val baseUrl: String) {
-    private val client = OkHttpClient()
-    private val mediaType = "application/json; charset=utf-8".toMediaType()
-
-    fun request(path: String, method: String, body: JSONObject?, token: String?): Any {
-        val builder = Request.Builder()
-            .url("$baseUrl$path")
-            .addHeader("Content-Type", "application/json")
-
-        if (!token.isNullOrBlank()) {
-            builder.addHeader("Authorization", "Bearer $token")
-        }
-
-        when (method.uppercase()) {
-            "GET" -> builder.get()
-            "POST" -> builder.post((body ?: JSONObject()).toString().toRequestBody(mediaType))
-            else -> throw IllegalArgumentException("Phương thức không hỗ trợ: $method")
-        }
-
-        client.newCall(builder.build()).execute().use { response ->
-            val raw = response.body?.string().orEmpty()
-            val payload = if (raw.isBlank()) JSONObject() else JSONObject(raw)
-            if (!response.isSuccessful || payload.optBoolean("success") == false) {
-                val errorMessage = payload.optJSONObject("error")?.optString("message")
-                    ?: payload.optString("message")
-                    ?: "Request failed (${response.code})"
-                throw IllegalStateException(errorMessage)
-            }
-            return payload.opt("data") ?: JSONObject()
-        }
+    private companion object {
+        const val MAX_OFFLINE_QUEUE_SIZE = 500
     }
 }

@@ -1,81 +1,56 @@
-# TicketBox Scanner Native Android
+# TicketBox Scanner Android
 
-Ung dung Android native viet bang Kotlin cho nhan vien soat ve.
+Ứng dụng Android native Kotlin dành cho nhân viên soát vé TicketBox.
 
-## Mo bang Android Studio
+## Mở bằng Android Studio
 
-1. Mo Android Studio.
-2. Chon `Open`.
-3. Chon thu muc:
+1. Mở Android Studio.
+2. Chọn `Open`.
+3. Chọn thư mục:
 
 ```text
-C:\Users\HP\Downloads\TKPM\Project_TicketBox\Ticket-Box-\scanner-android
+C:\Users\HP\Downloads\SE_Project\Ticket-Box\scanner-android
 ```
 
-4. Doi Android Studio sync Gradle xong.
-5. Cam dien thoai Android bang USB hoac mo emulator.
-6. Bam `Run`.
+4. Đợi Android Studio sync Gradle.
+5. Cắm điện thoại Android hoặc mở emulator.
+6. Bấm `Run`.
 
-## Cau hinh backend khi test
+## Chạy backend khi test
 
-Dien thoai va laptop phai cung Wi-Fi.
-
-Tren laptop chay backend:
+Điện thoại và laptop cần cùng Wi-Fi.
 
 ```powershell
-cd C:\Users\HP\Downloads\TKPM\Project_TicketBox\Ticket-Box-
+cd C:\Users\HP\Downloads\SE_Project\Ticket-Box
 docker compose up -d postgres redis rabbitmq minio
 cd backend
 npm run dev
 ```
 
-Tren trinh duyet dien thoai, test truoc:
+Trên điện thoại, kiểm tra backend trước:
 
 ```text
-http://192.168.1.5:3000/health
+http://<IP-LAN-CUA-LAPTOP>:3000/health
 ```
 
-Neu link nay khong mo duoc thi app cung khong login duoc. Kiem tra lai IP laptop, cung Wi-Fi va Windows Firewall.
-
-## Dang nhap app
-
-Trong app nhap API URL:
+Trong app nhập API URL:
 
 ```text
-http://192.168.1.5:3000/api/v1
+http://<IP-LAN-CUA-LAPTOP>:3000/api/v1
 ```
 
-Tai khoan seed:
+## Luồng sử dụng
 
-```text
-Email: staff@example.com
-Password: Password123!
-```
+1. Lưu API URL.
+2. Đăng nhập bằng tài khoản `CHECKIN_STAFF`.
+3. App tải danh sách concert/gate được phân công.
+4. Chọn concert và gate.
+5. Quét QR bằng camera hoặc nhập mã thủ công.
+6. Khi mất mạng, lượt quét được lưu vào hàng đợi ngoại tuyến.
+7. Khi có mạng lại, bấm `Đồng bộ lượt ngoại tuyến`.
 
-Hoac:
+## Ghi chú kỹ thuật
 
-```text
-Email: staff2@example.com
-Password: Password123!
-```
-
-## Luong test
-
-1. Luu API URL.
-2. Dang nhap bang tai khoan `CHECKIN_STAFF`.
-3. App tai concert/gate duoc phan cong.
-4. Chon concert va gate.
-5. Quet QR bang camera hoac dan ma ve thu cong.
-6. Tat mang de test offline queue.
-7. Bat mang lai va bam `Dong bo luot offline`.
-
-## Vi sao app nay khong bi loi CLEARTEXT
-
-Project da khai bao trong `AndroidManifest.xml`:
-
-```xml
-android:usesCleartextTraffic="true"
-android:networkSecurityConfig="@xml/network_security_config"
-```
-
-Va `network_security_config.xml` cho phep HTTP cleartext de demo voi backend local.
+- Debug build cho phép HTTP cleartext để test backend local qua Wi-Fi.
+- Main/release config không bật cleartext mặc định.
+- Token và offline queue được tách vào local store riêng để `MainActivity` không ôm logic lưu trữ.
