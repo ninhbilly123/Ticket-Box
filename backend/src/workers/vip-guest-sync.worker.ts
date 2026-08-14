@@ -4,19 +4,18 @@ import { queueConnection } from '../shared/lib/queue';
 import { getVipGuestImportQueue } from '../shared/lib/job-queues';
 import { fetchCsvAttachmentsFromMailbox, ImapMailboxUnavailableError } from '../shared/lib/imap';
 import { VipGuestSyncService } from '../modules/vip-guest-sync/vip-guest-sync.service';
-import { prisma } from '../shared/lib/prisma';
-import { PrismaService } from '../shared/modules/prisma.service';
 
-const vipGuestSyncService = new VipGuestSyncService(prisma as unknown as PrismaService);
 let vipGuestImportWorker: Worker | null = null;
 let isPollingMailbox = false;
 let cronScheduled = false;
 
-async function processVipGuestImport(job: Job<{ importJobId: string }>) {
-  await vipGuestSyncService.processImportJob(job.data.importJobId);
+function processVipGuestImport(vipGuestSyncService: VipGuestSyncService) {
+  return async (job: Job<{ importJobId: string }>) => {
+    await vipGuestSyncService.processImportJob(job.data.importJobId);
+  };
 }
 
-export async function pollSponsorMailbox(): Promise<void> {
+export async function pollSponsorMailbox(vipGuestSyncService: VipGuestSyncService): Promise<void> {
   if (isPollingMailbox) {
     console.warn('[VipGuestSyncWorker] Previous mailbox poll is still running. Skipping this tick.');
     return;
@@ -53,9 +52,9 @@ export async function pollSponsorMailbox(): Promise<void> {
   if (queuedCount === 0) await vipGuestSyncService.createNoFileReport();
 }
 
-export function startVipGuestSyncWorker() {
+export function startVipGuestSyncWorker(vipGuestSyncService: VipGuestSyncService) {
   if (!vipGuestImportWorker) {
-    vipGuestImportWorker = new Worker('vipGuestImportQueue', processVipGuestImport, {
+    vipGuestImportWorker = new Worker('vipGuestImportQueue', processVipGuestImport(vipGuestSyncService), {
       connection: queueConnection,
     });
     vipGuestImportWorker.on('failed', (job, error) => {
@@ -72,7 +71,7 @@ export function startVipGuestSyncWorker() {
   }
 
   cron.schedule(cronExpression, () => {
-    pollSponsorMailbox().catch((error) => {
+    pollSponsorMailbox(vipGuestSyncService).catch((error) => {
       console.error('[VipGuestSyncWorker] Mailbox poll failed:', error);
     });
   });

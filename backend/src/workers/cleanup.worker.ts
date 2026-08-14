@@ -1,16 +1,12 @@
 import { OrderHoldService } from '../modules/order/order-hold.service';
-import { prisma } from '../shared/lib/prisma';
-import { PrismaService } from '../shared/modules/prisma.service';
 import { invalidateTicketAvailabilityCache } from '../modules/concert/concert-detail-cache';
-
-const orderHoldService = new OrderHoldService(prisma as unknown as PrismaService);
 
 /**
  * Safety fallback for expired pending orders.
  * RabbitMQ delayed jobs are the primary expiration trigger; this scanner only
  * catches orders whose delayed message was missed while the app was down.
  */
-export async function cleanupExpiredOrders() {
+export async function cleanupExpiredOrders(orderHoldService: OrderHoldService) {
   try {
     const results = await orderHoldService.expireOldPendingOrders();
     const expiredResults = results.filter((result) => result.result === 'expired');
@@ -24,9 +20,9 @@ export async function cleanupExpiredOrders() {
   }
 }
 
-export function startCleanupWorker() {
+export function startCleanupWorker(orderHoldService: OrderHoldService) {
   console.log('[Cleanup Worker] Background cleanup worker initialized (safety scan every 60s)...');
-  setInterval(cleanupExpiredOrders, 60 * 1000);
+  setInterval(() => cleanupExpiredOrders(orderHoldService), 60 * 1000);
 }
 
 export default startCleanupWorker;

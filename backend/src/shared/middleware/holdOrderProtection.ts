@@ -2,10 +2,6 @@ import { NextFunction, Request, Response } from 'express';
 import redisClient, { isRedisReady, runRedisOperation } from '../lib/redis';
 import { AppError } from '../lib/errors';
 import { WaitingRoomService } from '../../modules/concert/waiting-room.service';
-import { prisma } from '../lib/prisma';
-import { PrismaService } from '../modules/prisma.service';
-
-const waitingRoomService = new WaitingRoomService(prisma as unknown as PrismaService);
 
 const DEFAULT_WINDOW_SECONDS = 60;
 const DEFAULT_USER_LIMIT = 5;
@@ -83,21 +79,23 @@ export async function holdOrderRateLimit(req: Request, res: Response, next: Next
   }
 }
 
-export async function requireCheckoutTokenForHotConcert(req: Request, res: Response, next: NextFunction) {
-  try {
-    if (!req.user) {
-      throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
-    }
+export function createRequireCheckoutTokenForHotConcert(waitingRoomService: WaitingRoomService) {
+  return async function requireCheckoutTokenForHotConcert(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        throw new AppError(401, 'AUTH_TOKEN_EXPIRED', 'Authentication is required.');
+      }
 
-    const concertId = typeof req.body?.concertId === 'string' ? req.body.concertId : undefined;
-    if (!concertId) {
+      const concertId = typeof req.body?.concertId === 'string' ? req.body.concertId : undefined;
+      if (!concertId) {
+        return next();
+      }
+
+      const checkoutTokenHeader = req.header('Checkout-Token');
+      await waitingRoomService.validateCheckoutTokenForHold(concertId, req.user.id, checkoutTokenHeader || undefined);
       return next();
+    } catch (error) {
+      return next(error);
     }
-
-    const checkoutTokenHeader = req.header('Checkout-Token');
-    await waitingRoomService.validateCheckoutTokenForHold(concertId, req.user.id, checkoutTokenHeader || undefined);
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+  };
 }

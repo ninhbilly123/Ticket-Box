@@ -1,11 +1,8 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
-import { prisma } from '../src/shared/lib/prisma';
 import { PaymentService } from '../src/modules/payment/payment.service';
 import http from 'http';
-
-const paymentService = new PaymentService(prisma as any);
 
 async function getRequest(url: string): Promise<{ status: number; data: any }> {
   return new Promise((resolve, reject) => {
@@ -30,6 +27,7 @@ async function main() {
   console.log('1. Khởi chạy API Server trên cổng ngẫu nhiên...');
   const app = await NestFactory.create(AppModule, { logger: false });
   await app.listen(0);
+  const paymentService = app.get(PaymentService);
   const address = app.getHttpServer().address();
   if (!address || typeof address !== 'object') {
     throw new Error('Failed to bind server port');

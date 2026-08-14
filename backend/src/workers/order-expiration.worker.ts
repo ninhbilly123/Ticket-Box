@@ -1,13 +1,9 @@
 import { ConsumeMessage } from 'amqplib';
 import { assertOrderExpirationTopology, ORDER_EXPIRE_QUEUE, publishOrderExpirationJob } from '../modules/order/order-expiration';
 import { OrderHoldService } from '../modules/order/order-hold.service';
-import { prisma } from '../shared/lib/prisma';
-import { PrismaService } from '../shared/modules/prisma.service';
 import { invalidateTicketAvailabilityCache } from '../modules/concert/concert-detail-cache';
 
-const orderHoldService = new OrderHoldService(prisma as unknown as PrismaService);
-
-export async function startOrderExpirationWorker() {
+export async function startOrderExpirationWorker(orderHoldService: OrderHoldService) {
   try {
     const channel = await assertOrderExpirationTopology();
     await channel.prefetch(1);
@@ -50,7 +46,7 @@ export async function startOrderExpirationWorker() {
     console.log(`[Order Expiration Worker] Worker started, listening to queue [${ORDER_EXPIRE_QUEUE}]...`);
   } catch (error) {
     console.error('[Order Expiration Worker] Failed to start listener:', error);
-    setTimeout(startOrderExpirationWorker, 5000);
+    setTimeout(() => startOrderExpirationWorker(orderHoldService), 5000);
   }
 }
 

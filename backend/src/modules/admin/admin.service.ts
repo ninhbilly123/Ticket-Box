@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderStatus, Prisma, WhitelistConfigStatus } from '@prisma/client';
+import type { OrderStatus, WhitelistConfigStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { AppError } from '../../shared/lib/errors';
 import { AuthUser } from '../../shared/types/auth';
@@ -7,11 +7,10 @@ import { PrismaService } from '../../shared/modules/prisma.service';
 import { AuthorizationService } from '../rbac/authorization.service';
 import { normalizeRole } from '../rbac/roles';
 import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
-import {
-  assertZoneCode,
-  sanitizeAndValidateSeatMapSvg,
-} from '../../shared/lib/seat-map-svg';
+import { sanitizeAndValidateSeatMapSvg } from '../../shared/lib/seat-map-svg';
+import { AdminConcertAccessService } from './admin-concert-access.service';
 import { AdminReadinessService } from './admin-readiness.service';
+import { AdminTicketTypeService, TicketTypeInput, TicketTypeUpdateInput } from './admin-ticket-type.service';
 
 const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
 
@@ -25,32 +24,14 @@ interface ConcertUpdateInput {
   seatMapEnabled?: boolean;
 }
 
-interface TicketTypeInput {
-  name: string;
-  zoneCode: string;
-  price: number;
-  totalQuantity: number;
-  maxPerAccount: number;
-  saleOpenAt?: string;
-  saleCloseAt?: string;
-}
-
-interface TicketTypeUpdateInput {
-  name?: string;
-  zoneCode?: string;
-  price?: number;
-  maxPerAccount?: number;
-  saleOpenAt?: string | null;
-  saleCloseAt?: string | null;
-  status?: 'ACTIVE' | 'INACTIVE';
-}
-
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
-    private readonly readinessService: AdminReadinessService
+    private readonly concertAccess: AdminConcertAccessService,
+    private readonly readinessService: AdminReadinessService,
+    private readonly ticketTypeService: AdminTicketTypeService
   ) {}
   public async listConcerts(user: AuthUser) {
     return this.prisma.concert.findMany({
@@ -257,174 +238,28 @@ export class AdminService {
   }
 
   public async listTicketTypes(user: AuthUser, concertId: string) {
-    await this.assertCanManageConcert(user, concertId);
-    return this.prisma.ticketType.findMany({
-      where: { concertId },
-      include: { inventory: true },
-      orderBy: { price: 'desc' },
-    });
+    return this.ticketTypeService.listTicketTypes(user, concertId);
   }
 
   public async createTicketType(user: AuthUser, concertId: string, input: TicketTypeInput) {
-    const concert = await this.assertCanManageConcert(user, concertId);
-    this.assertDraft(concert.status);
-    const zoneCode = assertZoneCode(input.zoneCode);
-    this.validateTicketTypeInput(input, concert);
-    await this.assertTicketTypeIdentityAvailable(concertId, input.name, zoneCode);
-
-    const ticketType = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const ticketType = await tx.ticketType.create({
-        data: {
-          concertId,
-          name: input.name.trim(),
-          zoneCode,
-          price: input.price,
-          totalQuantity: input.totalQuantity,
-          maxPerAccount: input.maxPerAccount,
-          saleOpenAt: input.saleOpenAt ? new Date(input.saleOpenAt) : null,
-          saleCloseAt: input.saleCloseAt ? new Date(input.saleCloseAt) : null,
-          status: 'ACTIVE',
-        },
-      });
-
-      await tx.ticketInventory.create({
-        data: {
-          ticketTypeId: ticketType.id,
-          totalQuantity: input.totalQuantity,
-          availableQuantity: input.totalQuantity,
-          reservedQuantity: 0,
-          soldQuantity: 0,
-        },
-      });
-
-      return ticketType;
-    });
-
-    await publishConcertListingInvalidation('ticket-type.updated', { concertId, ticketTypeId: ticketType.id });
-    return ticketType;
+    return this.ticketTypeService.createTicketType(user, concertId, input);
   }
 
   public async updateTicketType(user: AuthUser, ticketTypeId: string, input: TicketTypeUpdateInput) {
-    const ticketType = await this.prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
-    if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
-    const concert = await this.assertCanManageConcert(user, ticketType.concertId);
-    this.assertDraft(concert.status);
-
-    const data: Record<string, unknown> = {};
-    if (input.name) data.name = input.name.trim();
-    if (input.zoneCode) data.zoneCode = assertZoneCode(input.zoneCode);
-    if (typeof input.price === 'number') {
-      data.price = input.price;
-    }
-    if (typeof input.maxPerAccount === 'number') {
-      if (input.maxPerAccount <= 0) throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'maxPerAccount must be positive.');
-      data.maxPerAccount = input.maxPerAccount;
-    }
-    if (input.saleOpenAt !== undefined) data.saleOpenAt = input.saleOpenAt ? new Date(input.saleOpenAt) : null;
-    if (input.saleCloseAt !== undefined) data.saleCloseAt = input.saleCloseAt ? new Date(input.saleCloseAt) : null;
-    if (input.status) data.status = input.status;
-
-    const saleOpenAt = input.saleOpenAt !== undefined
-      ? (input.saleOpenAt ? new Date(input.saleOpenAt) : null)
-      : ticketType.saleOpenAt;
-    const saleCloseAt = input.saleCloseAt !== undefined
-      ? (input.saleCloseAt ? new Date(input.saleCloseAt) : null)
-      : ticketType.saleCloseAt;
-    this.validateTicketSaleWindow(saleOpenAt, saleCloseAt, concert);
-    await this.assertTicketTypeIdentityAvailable(
-      ticketType.concertId,
-      (data.name as string | undefined) || ticketType.name,
-      (data.zoneCode as string | undefined) || ticketType.zoneCode,
-      ticketTypeId
-    );
-
-    const updated = await this.prisma.ticketType.update({ where: { id: ticketTypeId }, data });
-    await publishConcertListingInvalidation('ticket-type.updated', {
-      concertId: ticketType.concertId,
-      ticketTypeId,
-    });
-    return updated;
+    return this.ticketTypeService.updateTicketType(user, ticketTypeId, input);
   }
 
   public async deleteTicketType(user: AuthUser, ticketTypeId: string) {
-    const ticketType = await this.prisma.ticketType.findUnique({ where: { id: ticketTypeId } });
-    if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
-    const concert = await this.assertCanManageConcert(user, ticketType.concertId);
-    this.assertDraft(concert.status);
-
-    const soldOrReserved = await this.prisma.ticket.count({
-      where: { orderItem: { ticketTypeId } },
-    });
-    if (soldOrReserved > 0) {
-      throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'Ticket type already has issued tickets.');
-    }
-
-    await this.prisma.ticketType.delete({ where: { id: ticketTypeId } });
-    await publishConcertListingInvalidation('ticket-type.updated', {
-      concertId: ticketType.concertId,
-      ticketTypeId,
-    });
-    return { deleted: true };
+    return this.ticketTypeService.deleteTicketType(user, ticketTypeId);
   }
 
   public async getInventory(user: AuthUser, ticketTypeId: string) {
-    const ticketType = await this.prisma.ticketType.findUnique({
-      where: { id: ticketTypeId },
-      include: { inventory: true },
-    });
-    if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
-    await this.assertCanManageConcert(user, ticketType.concertId);
-    return ticketType.inventory || this.deriveInventory(ticketType);
+    return this.ticketTypeService.getInventory(user, ticketTypeId);
   }
 
   public async updateInventory(user: AuthUser, ticketTypeId: string, totalQuantity: number) {
-    const ticketType = await this.prisma.ticketType.findUnique({
-      where: { id: ticketTypeId },
-      include: { inventory: true },
-    });
-    if (!ticketType) throw new AppError(404, 'TICKET_TYPE_NOT_FOUND', 'Ticket type not found.');
-    await this.assertCanManageConcert(user, ticketType.concertId);
-
-    const reservedQuantity = ticketType.inventory?.reservedQuantity ?? ticketType.reservedQuantity;
-    const soldQuantity = ticketType.inventory?.soldQuantity ?? ticketType.soldQuantity;
-    if (totalQuantity < reservedQuantity + soldQuantity) {
-      throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'New total quantity cannot be less than sold plus reserved quantity.');
-    }
-
-    const inventory = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.ticketType.update({
-        where: { id: ticketTypeId },
-        data: {
-          totalQuantity,
-          reservedQuantity,
-          soldQuantity,
-        },
-      });
-
-      return tx.ticketInventory.upsert({
-        where: { ticketTypeId },
-        create: {
-          ticketTypeId,
-          totalQuantity,
-          availableQuantity: totalQuantity - reservedQuantity - soldQuantity,
-          reservedQuantity,
-          soldQuantity,
-        },
-        update: {
-          totalQuantity,
-          availableQuantity: totalQuantity - reservedQuantity - soldQuantity,
-          reservedQuantity,
-          soldQuantity,
-        },
-      });
-    });
-    await publishConcertListingInvalidation('ticket-type.updated', {
-      concertId: ticketType.concertId,
-      ticketTypeId,
-    });
-    return inventory;
+    return this.ticketTypeService.updateInventory(user, ticketTypeId, totalQuantity);
   }
-
   public async listStaffAssignments(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
     return this.prisma.staffAssignment.findMany({
@@ -633,39 +468,15 @@ export class AdminService {
   }
 
   private concertScope(user: AuthUser) {
-    if (user.role !== 'ORGANIZER') {
-      return { id: '00000000-0000-0000-0000-000000000000' };
-    }
-    if (!user.organizationId) {
-      return { organizerId: user.id };
-    }
-    return {
-      OR: [
-        { organizationId: user.organizationId },
-        { organizerId: user.id },
-      ],
-    };
+    return this.concertAccess.concertScope(user);
   }
 
   private async assertCanManageConcert(user: AuthUser, concertId: string) {
-    const concert = await this.prisma.concert.findUnique({ where: { id: concertId } });
-    if (!concert) throw new AppError(404, 'CONCERT_NOT_FOUND', 'Concert not found.');
-
-    const canManage = await this.authorizationService.canManageConcert(user, concertId);
-    if (!canManage) {
-      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'You do not have permission to manage this concert.');
-    }
-    return concert;
+    return this.concertAccess.assertCanManageConcert(user, concertId);
   }
 
   private resolveWritableOrganization(user: AuthUser, organizationId?: string): string {
-    if (user.role !== 'ORGANIZER' || !user.organizationId) {
-      throw new AppError(403, 'FORBIDDEN_ROLE', 'Only ORGANIZER can manage organization resources.');
-    }
-    if (organizationId && organizationId !== user.organizationId) {
-      throw new AppError(403, 'FORBIDDEN_RESOURCE', 'Cannot manage another organization.');
-    }
-    return user.organizationId;
+    return this.concertAccess.resolveWritableOrganization(user, organizationId);
   }
 
   private validateConcertSchedule(startAt: Date, saleOpenAt: Date, requireFuture: boolean) {
@@ -677,35 +488,6 @@ export class AdminService {
     }
     if (requireFuture && startAt <= new Date()) {
       throw new AppError(400, 'CONCERT_SCHEDULE_INVALID', 'Thời gian biểu diễn phải ở tương lai.');
-    }
-  }
-
-  private validateTicketTypeInput(input: TicketTypeInput, concert: { saleOpenAt: Date; startAt: Date }) {
-    if (input.price < 0 || input.totalQuantity < 0 || input.maxPerAccount <= 0) {
-      throw new AppError(400, 'TICKET_QUANTITY_INVALID', 'Ticket quantities and price are invalid.');
-    }
-    this.validateTicketSaleWindow(
-      input.saleOpenAt ? new Date(input.saleOpenAt) : null,
-      input.saleCloseAt ? new Date(input.saleCloseAt) : null,
-      concert
-    );
-  }
-
-  private validateTicketSaleWindow(
-    saleOpenAt: Date | null,
-    saleCloseAt: Date | null,
-    concert: { saleOpenAt: Date; startAt: Date }
-  ) {
-    const effectiveOpenAt = saleOpenAt || concert.saleOpenAt;
-    const effectiveCloseAt = saleCloseAt || concert.startAt;
-    if (!Number.isFinite(effectiveOpenAt.getTime()) || !Number.isFinite(effectiveCloseAt.getTime())) {
-      throw new AppError(400, 'SALE_TIME_INVALID', 'Thời gian bán vé không hợp lệ.');
-    }
-    if (effectiveOpenAt < concert.saleOpenAt) {
-      throw new AppError(400, 'SALE_TIME_INVALID', 'Loại vé không được mở bán trước concert.');
-    }
-    if (effectiveOpenAt >= effectiveCloseAt || effectiveCloseAt > concert.startAt) {
-      throw new AppError(400, 'SALE_TIME_INVALID', 'Cửa sổ bán vé phải kết thúc không sau thời gian biểu diễn.');
     }
   }
 
@@ -722,52 +504,8 @@ export class AdminService {
     }
   }
 
-  private async assertTicketTypeIdentityAvailable(
-    concertId: string,
-    name: string,
-    zoneCode: string,
-    excludeTicketTypeId?: string
-  ) {
-    const existing = await this.prisma.ticketType.findFirst({
-      where: {
-        concertId,
-        ...(excludeTicketTypeId ? { id: { not: excludeTicketTypeId } } : {}),
-        OR: [
-          { name: { equals: name.trim(), mode: 'insensitive' } },
-          { zoneCode: assertZoneCode(zoneCode) },
-        ],
-      },
-      select: { name: true, zoneCode: true },
-    });
-    if (existing) {
-      throw new AppError(
-        409,
-        'TICKET_TYPE_IDENTITY_EXISTS',
-        `Tên loại vé hoặc mã khu vực đã tồn tại (${existing.name} / ${existing.zoneCode}).`
-      );
-    }
-  }
-
   private assertDraft(status: string) {
-    if (status !== 'DRAFT') {
-      throw new AppError(409, 'CONCERT_CONFIG_LOCKED', 'Chỉ được thay đổi cấu hình này khi concert ở trạng thái DRAFT.');
-    }
-  }
-
-  private deriveInventory(ticketType: {
-    id: string;
-    totalQuantity: number;
-    reservedQuantity: number;
-    soldQuantity: number;
-  }) {
-    return {
-      ticketTypeId: ticketType.id,
-      totalQuantity: ticketType.totalQuantity,
-      availableQuantity: ticketType.totalQuantity - ticketType.reservedQuantity - ticketType.soldQuantity,
-      reservedQuantity: ticketType.reservedQuantity,
-      soldQuantity: ticketType.soldQuantity,
-    };
+    return this.concertAccess.assertDraft(status);
   }
 }
-
 

@@ -1,120 +1,43 @@
-import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import type { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
+import type { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
-import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
 import { getOrderHoldTtlMs } from '../order/order-expiration';
+import { PaymentCacheService } from './payment-cache.service';
+import { PaymentCircuitBreakerService } from './payment-circuit-breaker.service';
+import type { PaymentGateway, ProcessedPaymentStatus } from './payment.types';
+import { sortObject, timingSafeStringEqual, VnpayGatewayService } from './vnpay-gateway.service';
 
-type PaymentGateway = 'vnpay' | 'momo';
-type ProcessedPaymentStatus = Extract<PaymentStatus, 'SUCCESS' | 'FAILED'>;
+export { sortObject };
 
 const PENDING_ORDER_STATUSES: OrderStatus[] = ['pending', 'PENDING'];
-
-// Helper function to generate VNPAY time format (yyyyMMddHHmmss) in GMT+7
-function getVNPTime(): string {
-  const date = new Date();
-  // Vietnam timezone is GMT+7
-  const tzOffset = 7 * 60; // offset in minutes
-  const vnTime = new Date(date.getTime() + tzOffset * 60 * 1000 + date.getTimezoneOffset() * 60 * 1000);
-
-  const pad = (num: number) => String(num).padStart(2, '0');
-
-  const year = vnTime.getFullYear();
-  const month = pad(vnTime.getMonth() + 1);
-  const day = pad(vnTime.getDate());
-  const hour = pad(vnTime.getHours());
-  const minute = pad(vnTime.getMinutes());
-  const second = pad(vnTime.getSeconds());
-
-  return `${year}${month}${day}${hour}${minute}${second}`;
-}
-
-// Helper function to sort object parameters alphabetically by key (needed for VNPAY hashing)
-export function sortObject(obj: Record<string, string>) {
-  return Object.keys(obj).sort().reduce<Record<string, string>>((sorted, key) => {
-    sorted[encodeURIComponent(key)] = encodeURIComponent(obj[key]).replace(/%20/g, '+');
-    return sorted;
-  }, {});
-}
-
-// Helper to stringify parameters into key=value joined by &
-function stringifyParams(obj: Record<string, string>): string {
-  return Object.entries(obj)
-    .map(([key, val]) => `${key}=${val}`)
-    .join('&');
-}
-
-function timingSafeStringEqual(left?: string, right?: string): boolean {
-  if (!left || !right) return false;
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
 
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly circuitBreaker: PaymentCircuitBreakerService,
+    private readonly vnpayGateway: VnpayGatewayService,
+    private readonly paymentCache: PaymentCacheService
+  ) {}
   /**
-   * Helper to check Circuit Breaker state on Redis
+   * Backward-compatible facade for scripts/tests that exercise the breaker directly.
    */
   public async checkCircuitBreaker(gateway: string): Promise<void> {
-    if (!isRedisReady()) return; // Pass through if Redis is unavailable
-
-    const stateKey = `circuit_breaker:${gateway}:state`;
-    const state = await runRedisOperation(() => redisClient.get(stateKey));
-
-    if (state === 'OPEN') {
-      throw new AppError(
-        503,
-        'PAYMENT_GATEWAY_MAINTENANCE',
-        `Cổng thanh toán ${gateway.toUpperCase()} hiện đang gặp sự cố và đang trong quá trình bảo trì. Vui lòng chọn cổng thanh toán khác hoặc thử lại sau.`
-      );
-    }
+    return this.circuitBreaker.check(gateway);
   }
 
-  /**
-   * Helper to record API call failure (tripping the Circuit Breaker)
-   */
   public async recordFailure(gateway: string): Promise<void> {
-    if (!isRedisReady()) return;
-
-    const failureKey = `circuit_breaker:${gateway}:failures`;
-    const stateKey = `circuit_breaker:${gateway}:state`;
-
-    // Increment failure counter
-    const failures = await runRedisOperation(() => redisClient.incr(failureKey));
-    // Set expiry for failure count if not already set (e.g. 5 minutes window)
-    await runRedisOperation(() => redisClient.expire(failureKey, 300));
-
-    this.logger.log(`[Circuit Breaker] Gateway ${gateway} failure count: ${failures}/5`);
-
-    if (failures >= 5) {
-      this.logger.warn(`[Circuit Breaker] Tripping breaker for gateway ${gateway}. State set to OPEN.`);
-      // Set state to OPEN with 60 seconds TTL (cool-down period)
-      await runRedisOperation(() => redisClient.setEx(stateKey, 60, 'OPEN'));
-      // Reset failures
-      await runRedisOperation(() => redisClient.del(failureKey));
-    }
+    return this.circuitBreaker.recordFailure(gateway);
   }
 
-  /**
-   * Helper to record API call success (closing/resetting the Circuit Breaker)
-   */
   public async recordSuccess(gateway: string): Promise<void> {
-    if (!isRedisReady()) return;
-
-    const failureKey = `circuit_breaker:${gateway}:failures`;
-    const stateKey = `circuit_breaker:${gateway}:state`;
-
-    await runRedisOperation(() => redisClient.del(failureKey));
-    await runRedisOperation(() => redisClient.del(stateKey));
-    this.logger.log(`[Circuit Breaker] Gateway ${gateway} status reset to CLOSED.`);
+    return this.circuitBreaker.recordSuccess(gateway);
   }
 
   /**
@@ -158,14 +81,6 @@ export class PaymentService {
       throw new AppError(400, 'INVALID_ORDER_STATUS', 'Đơn hàng không ở trạng thái chờ thanh toán.');
     }
 
-    const tmnCode = process.env.VNPAY_TMN_CODE;
-    const secretKey = process.env.VNPAY_HASH_SECRET;
-    const vnpUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
-
-    if (!tmnCode || !secretKey) {
-      throw new AppError(500, 'CONFIG_ERROR', 'Chua cau hinh VNPAY_TMN_CODE hoac VNPAY_HASH_SECRET trong file .env');
-    }
-
     // Simulate VNPAY connection timeout check (Circuit Breaker demo)
     const simulateFailure = process.env.SIMULATE_PAYMENT_GATEWAY_FAILURE === 'true' && Math.random() < 0.05;
     if (simulateFailure) {
@@ -186,29 +101,13 @@ export class PaymentService {
       },
     });
 
-    // 3. Generate VNPAY sandbox payment URL
-    const vnpParams: Record<string, string> = {
-      vnp_Version: '2.1.0',
-      vnp_Command: 'pay',
-      vnp_TmnCode: tmnCode,
-      vnp_Locale: 'vn',
-      vnp_CurrCode: 'VND',
-      vnp_TxnRef: payment.id,
-      vnp_OrderInfo: `Thanh toan don hang ${order.id}`,
-      vnp_OrderType: 'other',
-      vnp_Amount: String(Math.round(Number(order.totalAmount) * 100)),
-      vnp_ReturnUrl: returnUrl,
-      vnp_IpAddr: ipAddr,
-      vnp_CreateDate: getVNPTime(),
-    };
-
-    const sortedParams = sortObject(vnpParams);
-    const signData = stringifyParams(sortedParams);
-    const hmac = crypto.createHmac('sha512', secretKey);
-    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-    sortedParams['vnp_SecureHash'] = signed;
-
-    const paymentUrl = `${vnpUrl}?${stringifyParams(sortedParams)}`;
+    const paymentUrl = this.vnpayGateway.createPaymentUrl({
+      paymentId: payment.id,
+      orderId: order.id,
+      amount: Number(order.totalAmount),
+      returnUrl,
+      ipAddr,
+    });
 
     return {
       paymentId: payment.id,
@@ -220,35 +119,20 @@ export class PaymentService {
    * Process webhook transaction result from VNPAY IPN (Webhook)
    */
   public async processVNPAYIpn(query: Record<string, unknown>) {
-    const secureHash = query['vnp_SecureHash'];
-
-    const secretKey = process.env.VNPAY_HASH_SECRET;
-    if (!secretKey) {
+    let verification;
+    try {
+      verification = this.vnpayGateway.verifyIpn(query);
+    } catch (err) {
+      this.logger.error('[VNPAY IPN] Verification error.', err instanceof Error ? err.stack : String(err));
       return { RspCode: '99', Message: 'Config error' };
     }
 
-    // 1. Verify VNPAY Signature
-    const vnpParams: Record<string, string> = {};
-    for (const key of Object.keys(query)) {
-      if (key !== 'vnp_SecureHash' && key !== 'vnp_SecureHashType') {
-        vnpParams[key] = String(query[key]);
-      }
-    }
-
-    const sortedParams = sortObject(vnpParams);
-    const signData = stringifyParams(sortedParams);
-    const hmac = crypto.createHmac('sha512', secretKey);
-    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
-    if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
+    if (!verification) {
       this.logger.error('[VNPAY IPN] Signature validation failed.');
       return { RspCode: '97', Message: 'Signature failure' };
     }
 
-    const paymentId = vnpParams['vnp_TxnRef'];
-    const responseCode = vnpParams['vnp_ResponseCode'];
-    const vnpAmountStr = vnpParams['vnp_Amount'];
-    const transactionNo = vnpParams['vnp_TransactionNo'];
+    const { paymentId, responseCode, amount: vnpAmountStr, transactionNo } = verification;
 
     // 2. Fetch payment record
     const payment = await this.prisma.payment.findUnique({
@@ -284,34 +168,14 @@ export class PaymentService {
    * Process return result from VNPAY redirection (GET vnpay-return)
    */
   public async processVNPAYReturn(query: Record<string, unknown>) {
-    const secureHash = query['vnp_SecureHash'];
+    const verification = this.vnpayGateway.verifyReturn(query);
 
-    const secretKey = process.env.VNPAY_HASH_SECRET;
-    if (!secretKey) {
-      throw new AppError(500, 'CONFIG_ERROR', 'Chưa cấu hình VNPAY_HASH_SECRET trong file .env');
-    }
-
-    // 1. Verify VNPAY Signature
-    const vnpParams: Record<string, string> = {};
-    for (const key of Object.keys(query)) {
-      if (key !== 'vnp_SecureHash' && key !== 'vnp_SecureHashType') {
-        vnpParams[key] = String(query[key]);
-      }
-    }
-
-    const sortedParams = sortObject(vnpParams);
-    const signData = stringifyParams(sortedParams);
-    const hmac = crypto.createHmac('sha512', secretKey);
-    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
-    if (!timingSafeStringEqual(String(secureHash || ''), signed)) {
+    if (!verification) {
       this.logger.error('[VNPAY Return] Signature validation failed.');
       return { success: false, message: 'Signature failure' };
     }
 
-    const paymentId = vnpParams['vnp_TxnRef'];
-    const responseCode = vnpParams['vnp_ResponseCode'];
-    const transactionNo = vnpParams['vnp_TransactionNo'];
+    const { paymentId, responseCode, transactionNo } = verification;
 
     // 2. Fetch payment record
     const payment = await this.prisma.payment.findUnique({
@@ -467,7 +331,7 @@ export class PaymentService {
               data: {
                 orderItemId: item.id,
                 userId: order.userId,
-                qrCode: `TICKET-${order.id.slice(0, 8)}-${crypto.randomUUID()}`,
+                qrCode: `TICKET-${order.id.slice(0, 8)}-${randomUUID()}`,
                 status: 'valid',
               },
             });
@@ -529,16 +393,7 @@ export class PaymentService {
 
       // 4. Invalidate Redis Cache for each affected ticket type
       const ticketTypeIds = Array.from(new Set(order.orderItems.map((item) => item.ticketTypeId)));
-      for (const ttId of ticketTypeIds) {
-        const cacheKey = `ticket_inventory:${ttId}`;
-        try {
-          if (isRedisReady()) {
-            await runRedisOperation(() => redisClient.del(cacheKey));
-          }
-        } catch (err) {
-          this.logger.error(`[Redis Invalidation Error] Failed to delete key ${cacheKey}.`, err instanceof Error ? err.stack : String(err));
-        }
-      }
+      await this.paymentCache.invalidateTicketInventories(ticketTypeIds);
 
       // Re-fetch tickets for RabbitMQ messages
       const updatedTickets = await tx.ticket.findMany({
@@ -618,7 +473,7 @@ export class PaymentService {
   public async handleVNPAYReturn(query: Record<string, unknown>) {
     const result = await this.processVNPAYReturn(query);
     const statusText = result.success ? 'Thanh toán thành công' : 'Thanh toán thất bại';
-    return `<!DOCTYPE html><html><head><title>Kết quả thanh toán</title></head><body><h1>${statusText}</h1><p>Mã đơn hàng: ${result.payment?.orderId || ''}</p></body></html>`;
+    return `<!DOCTYPE html><html><head><title>Kết quả thanh toán</title></head><body><h1>${statusText}</h1><p>Mã đơn hàng: ${result.payment?.orderId || ''}</p></body></html>`;
   }
 
   public async renderMockCheckout(_query: Record<string, unknown>) {

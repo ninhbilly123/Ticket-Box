@@ -1,9 +1,17 @@
 import { prisma } from '../src/shared/lib/prisma';
 import { OrderHoldService } from '../src/modules/order/order-hold.service';
+import { PaymentCacheService } from '../src/modules/payment/payment-cache.service';
+import { PaymentCircuitBreakerService } from '../src/modules/payment/payment-circuit-breaker.service';
 import { PaymentService } from '../src/modules/payment/payment.service';
+import { VnpayGatewayService } from '../src/modules/payment/vnpay-gateway.service';
 
 const orderHoldService = new OrderHoldService(prisma as any);
-const paymentService = new PaymentService(prisma as any);
+const paymentService = new PaymentService(
+  prisma as any,
+  new PaymentCircuitBreakerService(),
+  new VnpayGatewayService(),
+  new PaymentCacheService()
+);
 
 async function main() {
   console.log('=== Khởi chạy Payment & QR Code Verification Test (IM02) ===');

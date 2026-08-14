@@ -1,20 +1,20 @@
 import { Injectable, Module, OnApplicationBootstrap, Logger } from '@nestjs/common';
-import { PrismaService } from '../shared/modules/prisma.service';
 import { PrismaModule } from '../shared/modules/prisma.module';
 import { OrderModule } from '../modules/order/order.module';
 import { ConcertModule } from '../modules/concert/concert.module';
 import { VipGuestSyncModule } from '../modules/vip-guest-sync/vip-guest-sync.module';
 import { OrderHoldService } from '../modules/order/order-hold.service';
 import { WaitingRoomService } from '../modules/concert/waiting-room.service';
+import { VipGuestSyncService } from '../modules/vip-guest-sync/vip-guest-sync.service';
 
 @Injectable()
 export class WorkerOrchestratorService implements OnApplicationBootstrap {
   private readonly logger = new Logger(WorkerOrchestratorService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
     private readonly orderHoldService: OrderHoldService,
     private readonly waitingRoomService: WaitingRoomService,
+    private readonly vipGuestSyncService: VipGuestSyncService
   ) {}
 
   async onApplicationBootstrap() {
@@ -33,7 +33,7 @@ export class WorkerOrchestratorService implements OnApplicationBootstrap {
 
     try {
       const { startOrderExpirationWorker } = await import('./order-expiration.worker');
-      await startOrderExpirationWorker();
+      await startOrderExpirationWorker(this.orderHoldService);
     } catch (e) { this.logger.warn('Order expiration worker failed to start', e); }
 
     try {
@@ -48,7 +48,7 @@ export class WorkerOrchestratorService implements OnApplicationBootstrap {
 
     try {
       const { startVipGuestSyncWorker } = await import('./vip-guest-sync.worker');
-      startVipGuestSyncWorker();
+      startVipGuestSyncWorker(this.vipGuestSyncService);
     } catch (e) { this.logger.warn('VIP guest sync worker failed to start', e); }
 
     try {
