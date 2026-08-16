@@ -10,9 +10,14 @@ import { AuthUser } from '../../shared/types/auth';
 
 const scanTicketSchema = z.object({
   concertId: z.string().uuid(),
-  qrCode: z.string().trim().min(1),
+  qrCode: z.string().trim().min(1).optional(),
+  ticketId: z.string().trim().min(1).optional(),
   deviceId: z.string().trim().min(1).optional(),
   scannedAt: z.string().datetime({ offset: true }).optional(),
+  scannedAtLocal: z.string().datetime({ offset: true }).optional(),
+}).refine((data) => data.qrCode || data.ticketId, {
+  message: 'qrCode or ticketId is required',
+  path: ['qrCode'],
 });
 
 const offlineCheckinLogSchema = z.object({
@@ -47,9 +52,9 @@ export class CheckinController {
     const dto = scanTicketSchema.parse(body);
 
     const result = await this.checkinService.scanTicket({
-      ticketId: dto.qrCode,
+      ticketId: dto.qrCode || dto.ticketId!,
       deviceId: dto.deviceId || 'ONLINE_STAFF',
-      scannedAtLocal: dto.scannedAt || new Date().toISOString(),
+      scannedAtLocal: dto.scannedAt || dto.scannedAtLocal || new Date().toISOString(),
       concertId: dto.concertId,
       gateStaffId: user.id,
     });

@@ -81,15 +81,19 @@ class ApiClient(val baseUrl: String) {
     fun scanTicket(
         token: String,
         concertId: String,
+        gateId: String,
         qrCode: String,
         deviceId: String,
         scannedAt: String
     ): JSONObject {
         val body = JSONObject()
             .put("qrCode", qrCode)
+            .put("ticketId", qrCode)
             .put("concertId", concertId)
+            .put("gateId", gateId)
             .put("deviceId", deviceId)
             .put("scannedAt", scannedAt)
+            .put("scannedAtLocal", scannedAt)
         return request("/checkins/scan", "POST", body, token) as JSONObject
     }
 

@@ -15,3 +15,15 @@ data class OfflineScan(
     val customerPhone: String? = null,
     val customerCompany: String? = null
 )
+
+data class SyncedScanHistory(
+    val localId: String,
+    val ticketId: String,
+    val concertId: String,
+    val concertName: String,
+    val gateId: String,
+    val deviceId: String,
+    val staffId: String,
+    val scannedAtLocal: String,
+    val syncedAt: String
+)

@@ -33,6 +33,7 @@ import com.ticketbox.scanner.data.local.OfflineScanStore
 import com.ticketbox.scanner.data.local.SessionStore
 import com.ticketbox.scanner.data.model.AssignedConcert
 import com.ticketbox.scanner.data.model.OfflineScan
+import com.ticketbox.scanner.data.model.SyncedScanHistory
 import com.ticketbox.scanner.scanner.CameraQrScanner
 import com.ticketbox.scanner.ui.ScannerUiFactory
 import com.ticketbox.scanner.ui.muted
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var gateSpinner: Spinner
     private lateinit var queueText: TextView
     private lateinit var conflictListText: TextView
+    private lateinit var syncedHistoryText: TextView
     private lateinit var resultText: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var cameraContainer: LinearLayout
@@ -74,6 +76,8 @@ class MainActivity : ComponentActivity() {
     private var selectedConcert: AssignedConcert? = null
     private var selectedGateId: String? = null
     private var offlineQueue: MutableList<OfflineScan> = mutableListOf()
+    private var syncedHistory: MutableList<SyncedScanHistory> = mutableListOf()
+    private var scanRequestInFlight = false
 
     private val requestCameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -92,6 +96,7 @@ class MainActivity : ComponentActivity() {
         userId = sessionStore.userId
         apiClient = ApiClient(sessionStore.apiBaseUrl)
         offlineQueue = offlineScanStore.load()
+        syncedHistory = offlineScanStore.loadSyncedHistory()
 
         buildUi()
         qrScanner = CameraQrScanner(this, previewView) { code -> submitScan(code) }
@@ -237,6 +242,17 @@ class MainActivity : ComponentActivity() {
         scannerPanel.addView(conflictListText)
         scannerPanel.addView(ui.button("Đồng bộ lượt ngoại tuyến") { syncOfflineQueue() })
         scannerPanel.addView(ui.button("Dọn lượt đã đồng bộ") { clearResolvedQueue() })
+        scannerPanel.addView(ui.label("Lịch sử đồng bộ thành công"))
+        syncedHistoryText = ui.text("", 13, false).apply {
+            setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12))
+            background = ui.borderedBackground(Color.rgb(240, 253, 250), Color.rgb(167, 243, 208))
+            setTextColor(Color.rgb(20, 83, 45))
+            layoutParams = LinearLayout.LayoutParams(ui.matchParent(), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, ui.dp(4), 0, ui.dp(10))
+            }
+        }
+        scannerPanel.addView(syncedHistoryText)
+        scannerPanel.addView(ui.button("Xóa lịch sử đồng bộ") { clearSyncedHistory() })
         root.addView(scannerPanel)
     }
 
@@ -245,9 +261,13 @@ class MainActivity : ComponentActivity() {
         loginPanel.visibility = if (loggedIn) View.GONE else View.VISIBLE
         scannerPanel.visibility = if (loggedIn) View.VISIBLE else View.GONE
 
-        val online = isOnline()
+        val online = hasNetworkConnection()
         statusText.text = if (loggedIn) {
-            "Đã đăng nhập. Thiết bị: $deviceId. Mạng: ${if (online) "trực tuyến" else "ngoại tuyến"}"
+            if (online) {
+                "Đã đăng nhập. Thiết bị: $deviceId. Khi quét sẽ xác thực trực tiếp với backend."
+            } else {
+                "Đã đăng nhập. Thiết bị: $deviceId. Thiết bị đang ngoại tuyến; mã quét sẽ được lưu vào hàng đợi."
+            }
         } else {
             "Chưa đăng nhập. Hãy nhập API URL bằng IP LAN của laptop."
         }
@@ -369,16 +389,20 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        if (!isOnline()) {
+        if (scanRequestInFlight) return
+
+        if (!hasNetworkConnection()) {
             enqueueOffline(qrCode, "Thiết bị đang ngoại tuyến.")
             return
         }
 
+        scanRequestInFlight = true
         launchBusy {
             try {
                 val data = apiClient.scanTicket(
                     token = token,
                     concertId = concertId,
+                    gateId = gateId,
                     qrCode = qrCode,
                     deviceId = deviceId,
                     scannedAt = Instant.now().toString()
@@ -386,7 +410,14 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.Main) { renderScanResult(data) }
             } catch (error: NetworkException) {
                 withContext(Dispatchers.Main) {
-                    enqueueOffline(qrCode, error.message ?: "Không kết nối được backend.")
+                    renderError(
+                        "Không kết nối được backend để xác thực trực tiếp. " +
+                            "Kiểm tra API URL, backend đang chạy, và điện thoại cùng Wi-Fi với laptop."
+                    )
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    scanRequestInFlight = false
                 }
             }
         }
@@ -494,6 +525,22 @@ class MainActivity : ComponentActivity() {
 
         launchBusy {
             val result = apiClient.syncOfflineScans(token, concertId, deviceId, pending)
+            val syncedAt = Instant.now().toString()
+            val syncedItems = pending
+                .filter { item -> result.conflicts["${item.ticketId}|${item.scannedAtLocal}"] == null }
+                .map { item ->
+                    SyncedScanHistory(
+                        localId = item.localId,
+                        ticketId = item.ticketId,
+                        concertId = item.concertId,
+                        concertName = selectedConcert?.name ?: "Concert",
+                        gateId = item.gateId,
+                        deviceId = item.deviceId,
+                        staffId = item.staffId,
+                        scannedAtLocal = item.scannedAtLocal,
+                        syncedAt = syncedAt
+                    )
+                }
             offlineQueue = offlineQueue.map { item ->
                 if (pending.none { it.localId == item.localId }) {
                     item
@@ -515,6 +562,9 @@ class MainActivity : ComponentActivity() {
                 }
             }.toMutableList()
             offlineScanStore.save(offlineQueue)
+            if (syncedItems.isNotEmpty()) {
+                syncedHistory = offlineScanStore.appendSyncedHistory(syncedItems, MAX_SYNC_HISTORY_SIZE)
+            }
 
             withContext(Dispatchers.Main) {
                 renderQueue()
@@ -529,10 +579,18 @@ class MainActivity : ComponentActivity() {
         renderQueue()
     }
 
+    private fun clearSyncedHistory() {
+        syncedHistory = mutableListOf()
+        offlineScanStore.saveSyncedHistory(syncedHistory)
+        renderSyncedHistory()
+        toast("Đã xóa lịch sử đồng bộ thành công.")
+    }
+
     private fun renderQueue() {
         val pending = offlineQueue.count { it.syncStatus == "PENDING" }
         val conflict = offlineQueue.count { it.syncStatus == "CONFLICT" }
         queueText.text = "Hàng đợi ngoại tuyến: đang chờ $pending lượt, xung đột $conflict lượt."
+        renderSyncedHistory()
 
         val conflicts = offlineQueue.filter { it.syncStatus == "CONFLICT" }
         if (conflicts.isEmpty()) {
@@ -553,6 +611,35 @@ class MainActivity : ComponentActivity() {
             details.append("   Lỗi: ${item.lastError ?: "Không rõ lý do"}\n")
         }
         conflictListText.text = details.toString()
+    }
+
+    private fun renderSyncedHistory() {
+        if (!::syncedHistoryText.isInitialized) return
+        if (syncedHistory.isEmpty()) {
+            syncedHistoryText.text = "Chưa có lượt đồng bộ thành công."
+            return
+        }
+
+        val details = StringBuilder("Đã đồng bộ thành công ${syncedHistory.size} lượt gần nhất:\n")
+        syncedHistory.take(SYNC_HISTORY_DISPLAY_LIMIT).forEachIndexed { index, item ->
+            details.append("${index + 1}. Vé: ${shortCode(item.ticketId)} · ${item.concertName}\n")
+            details.append("   Cổng: ${item.gateId} · Quét: ${formatCompactTime(item.scannedAtLocal)} · Sync: ${formatCompactTime(item.syncedAt)}\n")
+        }
+        if (syncedHistory.size > SYNC_HISTORY_DISPLAY_LIMIT) {
+            details.append("... còn ${syncedHistory.size - SYNC_HISTORY_DISPLAY_LIMIT} lượt khác.")
+        }
+        syncedHistoryText.text = details.toString()
+    }
+
+    private fun shortCode(value: String): String {
+        return if (value.length <= 12) value else "${value.take(6)}...${value.takeLast(4)}"
+    }
+
+    private fun formatCompactTime(value: String): String {
+        return value
+            .replace("T", " ")
+            .replace(Regex("\\.\\d+Z$"), "Z")
+            .take(19)
     }
 
     private fun openCamera() {
@@ -594,11 +681,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun isOnline(): Boolean {
+    @Suppress("DEPRECATION")
+    private fun hasNetworkConnection(): Boolean {
         val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = manager.activeNetwork ?: return false
-        val capabilities = manager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val network = manager.activeNetwork
+        if (network != null) {
+            val capabilities = manager.getNetworkCapabilities(network) ?: return true
+            return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        }
+        return manager.activeNetworkInfo?.isConnectedOrConnecting == true
     }
 
     private fun toast(message: String) {
@@ -607,5 +702,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MAX_OFFLINE_QUEUE_SIZE = 500
+        const val MAX_SYNC_HISTORY_SIZE = 50
+        const val SYNC_HISTORY_DISPLAY_LIMIT = 10
     }
 }
