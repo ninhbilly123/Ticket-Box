@@ -5,7 +5,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Calendar,
@@ -13,17 +12,10 @@ import {
   Mic2,
   Music,
 } from 'lucide-react';
+import { CustomerErrorState, CustomerLoadingState } from '../../../../components/CustomerState';
 import { Concert, fetchConcertById } from '../../../../lib/api';
+import { getConcertImage, getMinimumTicketPrice, getTicketSaleClassName, getTicketSaleLabel, getTicketSaleState } from '../../../../lib/concert-assets';
 import { formatCurrency, formatDateTime } from '../../../../lib/format';
-
-const getConcertImage = (title: string): string => {
-  const normalized = title?.toLowerCase() || '';
-  if (normalized.includes('sky tour')) return '/concert-4.png';
-  if (normalized.includes('show cua den') || normalized.includes('show của đen') || normalized.includes('đen vâu') || normalized.includes('den vau')) return '/concert-5.png';
-  if (normalized.includes('tri am') || normalized.includes('mỹ tâm') || normalized.includes('my tam')) return '/concert-6.png';
-  if (normalized.includes('mtp special') || normalized.includes('special night')) return '/concert-7.png';
-  return '/concert-4.png'; // default fallback
-};
 
 export default function ConcertDetailPage() {
   const params = useParams();
@@ -59,7 +51,7 @@ export default function ConcertDetailPage() {
     if (!concert?.ticketTypes.length) return null;
 
     return {
-      minimumPrice: Math.min(...concert.ticketTypes.map((ticketType) => Number(ticketType.price))),
+      minimumPrice: getMinimumTicketPrice(concert.ticketTypes) || 0,
       remaining: concert.ticketTypes.reduce((total, ticketType) => total + ticketType.remaining, 0),
       typeCount: concert.ticketTypes.length,
     };
@@ -67,27 +59,27 @@ export default function ConcertDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-3 text-white">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm text-gray-400">Đang tải thông tin concert...</p>
+      <div className="min-h-screen bg-gray-950 px-6 py-12">
+        <CustomerLoadingState text="Đang tải thông tin concert..." />
       </div>
     );
   }
 
   if (error || !concert) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center text-white">
-        <AlertTriangle className="w-12 h-12 text-red-500 mb-3" />
-        <h1 className="text-xl font-bold mb-2">Không thể mở concert</h1>
-        <p className="text-sm text-gray-400 max-w-sm mb-6">{error || 'Không tìm thấy concert.'}</p>
-        <Link href="/" className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold">
-          Quay lại danh sách
-        </Link>
+      <div className="min-h-screen bg-gray-950 px-6 py-12 text-white">
+        <CustomerErrorState
+          title="Không thể mở concert"
+          message={error || 'Không tìm thấy concert.'}
+          backHref="/"
+          backLabel="Quay lại danh sách"
+        />
       </div>
     );
   }
 
   const artistBio = concert.artistBio?.trim();
+  const saleState = getTicketSaleState(concert);
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 pb-20">
@@ -152,8 +144,8 @@ export default function ConcertDetailPage() {
 
         {/* Ticket Summary Section (Centered) */}
         {ticketSummary ? (
-          <div className="max-w-md mx-auto bg-gray-900/60 p-5 rounded-2xl border border-gray-800 text-center shadow-md">
-            <div className="grid grid-cols-3 gap-2 text-sm divide-x divide-gray-800">
+          <div className="mx-auto max-w-2xl bg-gray-900/60 p-5 rounded-2xl border border-gray-800 text-center shadow-md">
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4 sm:divide-x sm:divide-gray-800">
               <div>
                 <dt className="text-gray-500 text-xs uppercase mb-1">Số lượng loại vé</dt>
                 <dd className="font-semibold text-white text-base">{ticketSummary.typeCount}</dd>
@@ -166,34 +158,59 @@ export default function ConcertDetailPage() {
                 <dt className="text-gray-500 text-xs uppercase mb-1">Số vé còn lại</dt>
                 <dd className="font-semibold text-white text-base">{ticketSummary.remaining}</dd>
               </div>
+              <div>
+                <dt className="text-gray-500 text-xs uppercase mb-1">Trạng thái</dt>
+                <dd className={`mx-auto inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase ${getTicketSaleClassName(saleState)}`}>
+                  {getTicketSaleLabel(saleState)}
+                </dd>
+              </div>
             </div>
           </div>
         ) : (
           <p className="text-center text-sm text-gray-500">Chưa có thông tin vé.</p>
         )}
 
+        {concert.ticketTypes.length > 0 && (
+          <section className="bg-gray-900 p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
+            <h2 className="text-lg font-bold text-white mb-4">Bảng giá vé</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead className="border-b border-gray-800 text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="py-3 pr-4">Loại vé</th>
+                    <th className="py-3 pr-4">Khu vực</th>
+                    <th className="py-3 pr-4">Giá</th>
+                    <th className="py-3 pr-4">Còn lại</th>
+                    <th className="py-3 pr-4">Giới hạn</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {concert.ticketTypes.map((ticketType) => (
+                    <tr key={ticketType.id}>
+                      <td className="py-3 pr-4 font-bold text-white">{ticketType.name}</td>
+                      <td className="py-3 pr-4">
+                        <span className="rounded-lg border border-gray-700 bg-gray-950 px-2 py-1 text-xs font-bold text-gray-300">
+                          {ticketType.zoneCode}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 font-bold text-indigo-300">{formatCurrency(ticketType.price)}</td>
+                      <td className={`py-3 pr-4 font-bold ${ticketType.remaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {ticketType.remaining > 0 ? `${ticketType.remaining} vé` : 'Hết vé'}
+                      </td>
+                      <td className="py-3 pr-4 text-gray-300">{ticketType.maxLimitPerUser} vé/tài khoản</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {/* Booking Button (Centered with pulse) */}
         <div className="flex justify-center">
-          <style dangerouslySetInnerHTML={{
-            __html: `
-            @keyframes slowPulse {
-              0%, 100% {
-                transform: scale(1);
-                box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2), 0 2px 4px -2px rgba(99, 102, 241, 0.2);
-              }
-              50% {
-                transform: scale(1.025);
-                box-shadow: 0 0 20px 6px rgba(99, 102, 241, 0.6);
-              }
-            }
-            .animate-slow-pulse {
-              animation: slowPulse 2.5s infinite ease-in-out;
-            }
-          `}} />
-
           <Link
             href={`/concert/${concert.id}/booking`}
-            className="animate-slow-pulse w-full max-w-sm min-h-12 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 transform"
+            className="animate-ticketbox-slow-pulse w-full max-w-sm min-h-12 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 transform"
           >
             Đặt vé ngay
             <ArrowRight className="w-4 h-4" />

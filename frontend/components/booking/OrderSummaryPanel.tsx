@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, CreditCard, ExternalLink, RefreshCw, Ticket } from 'lucide-react';
 import { BookTicketsResponse, HoldOrderResponse } from '../../lib/api';
 import { formatCurrency, formatDateTime, isFailedOrderStatus, isPaidStatus } from '../../lib/format';
@@ -27,6 +30,18 @@ export default function OrderSummaryPanel({
   const paid = isPaidStatus(orderSnapshot?.order.status);
   const failed = isFailedOrderStatus(orderSnapshot?.order.status);
   const paidTickets = orderSnapshot?.tickets || [];
+  const [now, setNow] = useState(Date.now());
+  const secondsLeft = useMemo(() => {
+    const expiresAt = new Date(holdResult.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt)) return holdResult.expiresInSeconds;
+    return Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  }, [holdResult.expiresAt, holdResult.expiresInSeconds, now]);
+  const countdownWarning = secondsLeft <= 60 && !paid && !failed;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
@@ -49,6 +64,19 @@ export default function OrderSummaryPanel({
         <div className="flex justify-between">
           <span className="text-slate-500">Hết hạn giữ vé</span>
           <span className="font-bold text-white">{formatDateTime(holdResult.expiresAt)}</span>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${countdownWarning ? 'border-amber-700/60 bg-amber-950/40' : 'border-slate-800 bg-slate-950/60'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-400">Thời gian còn lại</span>
+            <span className={`font-mono text-lg font-extrabold ${countdownWarning ? 'text-amber-300' : 'text-emerald-300'}`}>
+              {formatCountdown(secondsLeft)}
+            </span>
+          </div>
+          {countdownWarning && (
+            <p className="mt-1 text-[11px] text-amber-200">
+              Đơn giữ vé sắp hết hạn, hãy hoàn tất thanh toán hoặc tạo order mới.
+            </p>
+          )}
         </div>
         <div className="flex justify-between border-t border-slate-800 pt-2">
           <span className="text-slate-400 font-semibold">Tổng tiền</span>
@@ -163,4 +191,10 @@ export default function OrderSummaryPanel({
       </button>
     </div>
   );
+}
+
+function formatCountdown(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }

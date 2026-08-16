@@ -23,3 +23,18 @@
   filter: grayscale(1);
   opacity: 0.35;
 }
+
+@keyframes ticketbox-slow-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 6px -1px rgb(99 102 241 / 0.2), 0 2px 4px -2px rgb(99 102 241 / 0.2);
+  }
+  50% {
+    transform: scale(1.025);
+    box-shadow: 0 0 20px 6px rgb(99 102 241 / 0.6);
+  }
+}
+
+.animate-ticketbox-slow-pulse {
+  animation: ticketbox-slow-pulse 2.5s infinite ease-in-out;
+}

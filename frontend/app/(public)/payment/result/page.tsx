@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, Clock3, RefreshCw, Ticket } from 'lucide-react';
+import QrCodeImage from '../../../../components/QrCodeImage';
 import { BookTicketsResponse, fetchOrderById } from '../../../../lib/api';
 import { useAuth } from '../../../../lib/auth-context';
 import { formatCurrency, formatDateTime, isFailedOrderStatus, isPaidStatus } from '../../../../lib/format';
@@ -126,13 +127,36 @@ function PaymentResultContent() {
           <div className="mt-6 space-y-3">
             <h2 className="text-sm font-bold text-white">Vé đã cấp</h2>
             {order.tickets.map((ticket) => (
-              <div key={ticket.id} className="rounded-xl border border-gray-800 bg-gray-950 p-4 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase text-gray-500">Ticket code</p>
-                    <p className="mt-1 break-all font-mono font-bold text-white">{ticket.qrCode || ticket.id}</p>
+              <div key={ticket.id} className="grid gap-4 rounded-xl border border-gray-800 bg-gray-950 p-4 text-sm sm:grid-cols-[150px_1fr]">
+                <div className="flex justify-center">
+                  {ticket.qrCode ? (
+                    <div className="rounded-xl bg-white p-2">
+                      <QrCodeImage value={ticket.qrCode} alt="Mã QR của vé" className="h-32 w-32" />
+                    </div>
+                  ) : (
+                    <div className="flex h-32 w-32 items-center justify-center rounded-xl border border-dashed border-gray-700 text-gray-500">
+                      <Ticket className="h-8 w-8" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase text-gray-500">Ticket code</p>
+                      <p className="mt-1 break-all font-mono font-bold text-white">{ticket.qrCode || ticket.id}</p>
+                    </div>
+                    <Ticket className="h-6 w-6 shrink-0 text-indigo-400" />
                   </div>
-                  <Ticket className="h-6 w-6 text-indigo-400" />
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg border border-gray-800 bg-gray-900 p-2">
+                      <p className="text-gray-500">Trạng thái</p>
+                      <p className="mt-1 font-bold text-emerald-400">{ticket.status}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-800 bg-gray-900 p-2">
+                      <p className="text-gray-500">Ghế</p>
+                      <p className="mt-1 font-bold text-white">{ticket.seatNumber || 'N/A'}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}

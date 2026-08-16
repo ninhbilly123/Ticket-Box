@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import OrderHistoryPanel from '../../../../../components/booking/OrderHistoryPanel';
 import OrderSummaryPanel from '../../../../../components/booking/OrderSummaryPanel';
+import { CustomerErrorState, CustomerLoadingState } from '../../../../../components/CustomerState';
 import SeatMap from '../../../../../components/SeatMap';
 import {
   AuthSession,
@@ -328,22 +329,20 @@ export default function ConcertDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-3 text-white">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-gray-400 text-sm">Đang tải chi tiết sự kiện...</p>
+      <div className="min-h-screen bg-gray-950 px-6 py-12">
+        <CustomerLoadingState text="Đang tải chi tiết sự kiện..." />
       </div>
     );
   }
 
   if (error || !concert) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-white text-center">
-        <AlertTriangle className="w-12 h-12 text-red-500 mb-3" />
-        <h2 className="text-xl font-bold mb-2">Đã xảy ra lỗi</h2>
-        <p className="text-gray-400 text-sm max-w-sm mb-6">{error || 'Không tìm thấy dữ liệu sự kiện.'}</p>
-        <Link href="/" className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">
-          Quay lại trang chủ
-        </Link>
+      <div className="min-h-screen bg-gray-950 px-6 py-12 text-white">
+        <CustomerErrorState
+          message={error || 'Không tìm thấy dữ liệu sự kiện.'}
+          backHref="/"
+          backLabel="Quay lại trang chủ"
+        />
       </div>
     );
   }

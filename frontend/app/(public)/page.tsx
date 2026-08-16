@@ -1,19 +1,12 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Calendar, MapPin, Music, Search, SlidersHorizontal, RefreshCw } from 'lucide-react';
+import { CustomerEmptyState, CustomerErrorState, CustomerLoadingState } from '../../components/CustomerState';
 import { Concert, fetchConcerts } from '../../lib/api';
-
-const getConcertImage = (title: string): string => {
-  const normalized = title?.toLowerCase() || '';
-  if (normalized.includes('sky tour')) return '/concert-4.png';
-  if (normalized.includes('show cua den') || normalized.includes('show của đen') || normalized.includes('đen vâu') || normalized.includes('den vau')) return '/concert-5.png';
-  if (normalized.includes('tri am') || normalized.includes('mỹ tâm') || normalized.includes('my tam')) return '/concert-6.png';
-  if (normalized.includes('mtp special') || normalized.includes('special night')) return '/concert-7.png';
-  return '/concert-4.png'; // default fallback
-};
+import { getConcertImage, getTicketSaleClassName, getTicketSaleLabel, getTicketSaleState, getTicketTotalRemaining } from '../../lib/concert-assets';
 
 interface ConcertFilterState {
   search?: string;
@@ -24,6 +17,7 @@ interface ConcertFilterState {
 
 export default function ConcertListingPage() {
   const [concerts, setConcerts] = useState<Concert[]>([]);
+  const [filterCatalog, setFilterCatalog] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +40,9 @@ export default function ConcertListingPage() {
           date: filters.date || undefined,
         });
         setConcerts(data);
+        if (!filters.search && !filters.artist && !filters.location && !filters.date) {
+          setFilterCatalog(data);
+        }
       } catch (err) {
         setError((err as Error).message || 'Không thể tải danh sách concert.');
       } finally {
@@ -77,6 +74,15 @@ export default function ConcertListingPage() {
       date: '',
     });
   };
+
+  const artistOptions = useMemo(
+    () => Array.from(new Set(filterCatalog.map((concert) => concert.artist).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'vi')),
+    [filterCatalog]
+  );
+  const locationOptions = useMemo(
+    () => Array.from(new Set(filterCatalog.map((concert) => concert.location).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'vi')),
+    [filterCatalog]
+  );
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans pb-20">
@@ -135,10 +141,9 @@ export default function ConcertListingPage() {
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
               <option value="">-- Tất cả nghệ sĩ --</option>
-              <option value="Son Tung M-TP">Sơn Tùng M-TP</option>
-              <option value="Den Vau">Đen Vâu</option>
-              <option value="My Tam">Mỹ Tâm</option>
-              <option value="Hoang Thuy Linh">Hoàng Thùy Linh</option>
+              {artistOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
             </select>
 
             {/* Location filter */}
@@ -152,8 +157,9 @@ export default function ConcertListingPage() {
               className="bg-gray-950 border border-gray-800 rounded-lg text-xs py-2 px-3 text-gray-300 outline-none focus:border-indigo-500"
             >
               <option value="">-- Tất cả địa điểm --</option>
-              <option value="Ha Noi">Hà Nội</option>
-              <option value="HCM">TP. Hồ Chí Minh</option>
+              {locationOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
             </select>
 
             {/* Date filter */}
@@ -194,29 +200,23 @@ export default function ConcertListingPage() {
 
         {/* Listings Section */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-gray-400 text-sm">Đang tải danh sách sự kiện...</p>
-          </div>
+          <CustomerLoadingState text="Đang tải danh sách sự kiện..." />
         ) : error ? (
-          <div className="bg-red-950/20 border border-red-900/50 p-6 rounded-2xl text-center max-w-md mx-auto my-10 text-red-200">
-            <p className="font-semibold mb-2">Đã xảy ra lỗi</p>
-            <p className="text-sm text-red-300/80 mb-4">{error}</p>
-            <button onClick={() => loadConcerts({ search, artist, location, date })} className="bg-red-900 hover:bg-red-800 text-white text-xs px-4 py-2 rounded-lg">
-              Thử lại
-            </button>
-          </div>
+          <CustomerErrorState
+            message={error}
+            onRetry={() => loadConcerts({ search, artist, location, date })}
+          />
         ) : concerts.length === 0 ? (
-          <div className="bg-gray-900 border border-gray-800 p-12 rounded-2xl text-center max-w-md mx-auto my-10 text-gray-400">
-            <SlidersHorizontal className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-            <p className="font-semibold text-white mb-1">Không tìm thấy sự kiện nào</p>
-            <p className="text-xs text-gray-500">Hãy thử thay đổi từ khóa hoặc bộ lọc tìm kiếm của bạn.</p>
-          </div>
+          <CustomerEmptyState
+            title="Không tìm thấy sự kiện nào"
+            message="Hãy thử thay đổi từ khóa hoặc bộ lọc tìm kiếm của bạn."
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {concerts.map((concert) => {
               // Calculate summary of remaining tickets
-              const totalRemaining = concert.ticketTypes.reduce((sum, tt) => sum + tt.remaining, 0);
+              const totalRemaining = getTicketTotalRemaining(concert.ticketTypes);
+              const saleState = getTicketSaleState(concert);
 
               return (
                 <Link
@@ -277,6 +277,12 @@ export default function ConcertListingPage() {
                     <div className="mt-auto pt-4 border-t border-gray-800">
                       <div className="flex justify-between items-center mb-3 text-xs">
                         <span className="text-gray-400">Vé còn lại (real-time):</span>
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase ${getTicketSaleClassName(saleState)}`}>
+                          {getTicketSaleLabel(saleState)}
+                        </span>
+                      </div>
+                      <div className="mb-3 flex justify-between text-xs">
+                        <span className="text-gray-500">Tổng tồn kho</span>
                         <span className={`font-bold ${totalRemaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                           {totalRemaining > 0 ? `${totalRemaining} vé` : 'Hết vé'}
                         </span>
