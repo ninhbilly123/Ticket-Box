@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { generateVipGuestQrToken, verifyVipGuestQrToken } from '../../shared/lib/crypto';
+import {
+  CANCELLED_TICKET_STATUS,
+  USED_TICKET_STATUS,
+  VALID_TICKET_STATUS,
+} from '../../shared/domain/statuses';
 import { CheckinStatsService } from './checkin-stats.service';
 
 @Injectable()
@@ -149,9 +154,9 @@ export class CheckinService {
     // 5. Ghi nhận check-in thành công theo kiểu atomic để chống quét trùng đồng thời.
     const result = await this.prisma.$transaction(async (tx) => {
       const updatedTicket = await tx.ticket.updateMany({
-        where: { id: ticket.id, status: 'valid' },
+        where: { id: ticket.id, status: VALID_TICKET_STATUS },
         data: {
-          status: 'used',
+          status: USED_TICKET_STATUS,
           usedAt: scannedAt,
         },
       });
@@ -204,7 +209,7 @@ export class CheckinService {
 
     const latestTicket = await this.prisma.ticket.findUnique({ where: { id: ticket.id } });
     return {
-      status: latestTicket?.status === 'cancelled' ? 'CANCELLED' : 'INVALID_TICKET',
+      status: latestTicket?.status === CANCELLED_TICKET_STATUS ? 'CANCELLED' : 'INVALID_TICKET',
       customer,
     };
   }

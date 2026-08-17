@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
-
-const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
+import { PAID_ORDER_STATUSES, USED_TICKET_STATUS } from '../../shared/domain/statuses';
 
 @Injectable()
 export class CheckinStatsService {
@@ -22,7 +20,7 @@ export class CheckinStatsService {
         orderItem: {
           ticketTypeId: ticketType.id,
           order: {
-            status: { in: PAID_STATUSES },
+            status: { in: PAID_ORDER_STATUSES },
           },
         },
       };
@@ -32,7 +30,7 @@ export class CheckinStatsService {
         this.prisma.ticket.count({
           where: {
             ...paidTicketFilter,
-            status: 'used',
+            status: USED_TICKET_STATUS,
           },
         }),
       ]);

@@ -313,6 +313,7 @@ class MainActivity : ComponentActivity() {
             accessToken = session.accessToken
             userId = session.userId
             sessionStore.accessToken = session.accessToken
+            sessionStore.refreshToken = session.refreshToken.ifBlank { null }
             sessionStore.userId = session.userId
             withContext(Dispatchers.Main) {
                 renderSession()
@@ -333,9 +334,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadAssignedConcerts() {
-        val token = accessToken ?: return
+        if (accessToken == null) return
         launchBusy {
-            val nextConcerts = apiClient.listAssignedConcerts(token)
+            val nextConcerts = authenticatedCall { token -> apiClient.listAssignedConcerts(token) }
             withContext(Dispatchers.Main) {
                 concerts = nextConcerts
                 selectedConcert = concerts.firstOrNull()
@@ -383,8 +384,7 @@ class MainActivity : ComponentActivity() {
         val qrCode = rawCode.trim()
         val concertId = selectedConcert?.id
         val gateId = selectedGateId
-        val token = accessToken
-        if (qrCode.isBlank() || concertId.isNullOrBlank() || gateId.isNullOrBlank() || token == null) {
+        if (qrCode.isBlank() || concertId.isNullOrBlank() || gateId.isNullOrBlank() || accessToken == null) {
             toast("Cần chọn sự kiện/cổng soát vé và nhập mã vé.")
             return
         }
@@ -399,14 +399,16 @@ class MainActivity : ComponentActivity() {
         scanRequestInFlight = true
         launchBusy {
             try {
-                val data = apiClient.scanTicket(
-                    token = token,
-                    concertId = concertId,
-                    gateId = gateId,
-                    qrCode = qrCode,
-                    deviceId = deviceId,
-                    scannedAt = Instant.now().toString()
-                )
+                val data = authenticatedCall { token ->
+                    apiClient.scanTicket(
+                        token = token,
+                        concertId = concertId,
+                        gateId = gateId,
+                        qrCode = qrCode,
+                        deviceId = deviceId,
+                        scannedAt = Instant.now().toString()
+                    )
+                }
                 withContext(Dispatchers.Main) { renderScanResult(data) }
             } catch (error: NetworkException) {
                 withContext(Dispatchers.Main) {
@@ -507,7 +509,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun syncOfflineQueue() {
-        val token = accessToken ?: return
+        if (accessToken == null) return
         val concertId = selectedConcert?.id ?: return
         val gateId = selectedGateId ?: return
         val staffId = userId ?: return
@@ -524,7 +526,7 @@ class MainActivity : ComponentActivity() {
         }
 
         launchBusy {
-            val result = apiClient.syncOfflineScans(token, concertId, deviceId, pending)
+            val result = authenticatedCall { token -> apiClient.syncOfflineScans(token, concertId, deviceId, pending) }
             val syncedAt = Instant.now().toString()
             val syncedItems = pending
                 .filter { item -> result.conflicts["${item.ticketId}|${item.scannedAtLocal}"] == null }
@@ -660,13 +662,40 @@ class MainActivity : ComponentActivity() {
         qrScanner.stop()
     }
 
+    private suspend fun <T> authenticatedCall(request: (String) -> T): T {
+        val currentToken = accessToken ?: throw ApiException(401, "Phiên đăng nhập đã hết hạn.")
+        try {
+            return request(currentToken)
+        } catch (error: ApiException) {
+            if (error.statusCode != 401) {
+                throw error
+            }
+            val refreshedToken = refreshAccessToken() ?: throw error
+            return request(refreshedToken)
+        }
+    }
+
+    private suspend fun refreshAccessToken(): String? {
+        val currentRefreshToken = sessionStore.refreshToken ?: return null
+        val nextSession = apiClient.refresh(currentRefreshToken)
+        if (nextSession.role != "CHECKIN_STAFF") {
+            return null
+        }
+        accessToken = nextSession.accessToken
+        userId = nextSession.userId
+        sessionStore.accessToken = nextSession.accessToken
+        sessionStore.refreshToken = nextSession.refreshToken.ifBlank { currentRefreshToken }
+        sessionStore.userId = nextSession.userId
+        return nextSession.accessToken
+    }
+
     private fun launchBusy(block: suspend () -> Unit) {
         progressBar.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) { block() }
             } catch (error: ApiException) {
-                if (error.statusCode == 401 || error.statusCode == 403) {
+                if (error.statusCode == 401) {
                     logout()
                 }
                 renderError(error.message)

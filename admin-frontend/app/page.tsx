@@ -76,7 +76,10 @@ export default function AdminHomePage() {
   const [revenue, setRevenue] = useState<RevenueSummary | null>(null);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
 
-  const [loginForm, setLoginForm] = useState({ email: 'organizer@example.com', password: 'Password123!' });
+  const [loginForm, setLoginForm] = useState({
+    email: process.env.NEXT_PUBLIC_ADMIN_DEMO_EMAIL || '',
+    password: '',
+  });
   const [concertForm, setConcertForm] = useState(emptyConcertForm);
   const [concertFormError, setConcertFormError] = useState<string | null>(null);
   const [ticketTypeForm, setTicketTypeForm] = useState(emptyTicketTypeForm);

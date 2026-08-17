@@ -25,6 +25,7 @@ export class OrderController {
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
     @Headers('idempotency-key') idempotencyKey: string,
+    @Headers('checkout-token') checkoutToken: string | undefined,
     @Res() res: Response,
   ) {
     if (!idempotencyKey || Array.isArray(idempotencyKey)) {
@@ -37,6 +38,7 @@ export class OrderController {
       userId: user.id,
       concertId: dto.concertId,
       idempotencyKey: String(idempotencyKey),
+      checkoutToken,
       items: dto.items,
     });
 

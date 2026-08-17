@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ConcertStatus, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import redisClient, { isRedisReady, runRedisOperation } from '../../shared/lib/redis';
 import { AppError } from '../../shared/lib/errors';
+import {
+  PUBLIC_CONCERT_STATUSES,
+  PUBLIC_CONCERT_STATUSES_WITH_LEGACY,
+} from '../../shared/domain/statuses';
 import {
   ConcertListFilters,
   readConcertListCache,
@@ -14,8 +18,6 @@ import {
   writeConcertDetailCache,
   writeTicketAvailabilityCache,
 } from './concert-detail-cache';
-
-const PUBLIC_CONCERT_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
 
 @Injectable()
 export class ConcertService {
@@ -77,7 +79,7 @@ export class ConcertService {
   private async getConcertsFromDatabase(filters: ConcertListFilters) {
     const { search, artist, date, location } = filters;
     const whereClause: Prisma.ConcertWhereInput = {
-      status: { in: ['PUBLISHED', 'ON_SALE', 'published'] },
+      status: { in: PUBLIC_CONCERT_STATUSES_WITH_LEGACY },
     };
 
     // Filter upcoming concerts (today and future)

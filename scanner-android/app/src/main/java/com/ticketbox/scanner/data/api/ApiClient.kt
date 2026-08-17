@@ -13,6 +13,8 @@ import java.net.URL
 
 data class LoginSession(
     val accessToken: String,
+    val refreshToken: String,
+    val expiresAt: String?,
     val userId: String,
     val role: String
 )
@@ -54,6 +56,21 @@ class ApiClient(val baseUrl: String) {
         val user = data.getJSONObject("user")
         return LoginSession(
             accessToken = data.getString("accessToken"),
+            refreshToken = data.optString("refreshToken", ""),
+            expiresAt = data.optString("expiresAt").ifBlank { null },
+            userId = user.getString("id"),
+            role = user.getString("role")
+        )
+    }
+
+    fun refresh(refreshToken: String): LoginSession {
+        val body = JSONObject().put("refreshToken", refreshToken)
+        val data = request("/auth/refresh", "POST", body, null) as JSONObject
+        val user = data.getJSONObject("user")
+        return LoginSession(
+            accessToken = data.getString("accessToken"),
+            refreshToken = data.optString("refreshToken", ""),
+            expiresAt = data.optString("expiresAt").ifBlank { null },
             userId = user.getString("id"),
             role = user.getString("role")
         )

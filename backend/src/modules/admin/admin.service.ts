@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderStatus, WhitelistConfigStatus } from '@prisma/client';
+import type { WhitelistConfigStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { AppError } from '../../shared/lib/errors';
 import { AuthUser } from '../../shared/types/auth';
 import { PrismaService } from '../../shared/modules/prisma.service';
+import { PAID_ORDER_STATUSES } from '../../shared/domain/statuses';
 import { AuthorizationService } from '../rbac/authorization.service';
 import { normalizeRole } from '../rbac/roles';
 import { publishConcertListingInvalidation } from '../concert/concert-listing-events';
@@ -12,8 +13,6 @@ import { CheckinStatsService } from '../checkin/checkin-stats.service';
 import { AdminConcertAccessService } from './admin-concert-access.service';
 import { AdminReadinessService } from './admin-readiness.service';
 import { AdminTicketTypeService, TicketTypeInput, TicketTypeUpdateInput } from './admin-ticket-type.service';
-
-const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
 
 interface ConcertUpdateInput {
   eventCode?: string;
@@ -382,7 +381,7 @@ export class AdminService {
   public async revenueSummary(user: AuthUser, concertId: string) {
     await this.assertCanManageConcert(user, concertId);
     const paidOrders = await this.prisma.order.findMany({
-      where: { concertId, status: { in: PAID_STATUSES } },
+      where: { concertId, status: { in: PAID_ORDER_STATUSES } },
       include: {
         orderItems: { include: { ticketType: true, tickets: true } },
       },

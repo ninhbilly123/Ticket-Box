@@ -1,14 +1,16 @@
 import { Prisma } from '@prisma/client';
-import type { ConcertStatus, OrderStatus } from '@prisma/client';
+import type { OrderStatus } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/modules/prisma.service';
 import { AppError } from '../../shared/lib/errors';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
+import { WaitingRoomService } from '../concert/waiting-room.service';
 import { getOrderHoldTtlMs, getOrderHoldTtlSeconds, publishOrderExpirationJob } from './order-expiration';
-
-const PUBLIC_SALE_STATUSES: ConcertStatus[] = ['PUBLISHED', 'ON_SALE'];
-const PAID_STATUSES: OrderStatus[] = ['paid', 'PAID'];
-const PENDING_STATUSES: OrderStatus[] = ['pending', 'PENDING'];
+import {
+  PAID_ORDER_STATUSES,
+  PENDING_ORDER_STATUSES,
+  PUBLIC_CONCERT_STATUSES,
+} from '../../shared/domain/statuses';
 
 interface HoldOrderItemInput {
   ticketTypeId: string;
@@ -19,6 +21,7 @@ interface HoldOrderInput {
   userId: string;
   concertId: string;
   idempotencyKey: string;
+  checkoutToken?: string;
   items: HoldOrderItemInput[];
 }
 
@@ -32,7 +35,10 @@ interface LockedInventoryRow {
 
 @Injectable()
 export class OrderHoldService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly waitingRoomService: WaitingRoomService
+  ) {}
   public async holdOrder(input: HoldOrderInput) {
     const normalizedIdempotencyKey = input.idempotencyKey.trim();
     if (!normalizedIdempotencyKey) {
@@ -45,13 +51,15 @@ export class OrderHoldService {
       return this.handleExistingIdempotencyOrder(existing, input.userId);
     }
 
+    await this.waitingRoomService.consumeCheckoutTokenForHold(input.concertId, input.userId, input.checkoutToken);
+
     try {
       const order = await this.prisma.$transaction(async (tx) => {
         const now = new Date();
         const concert = await tx.concert.findFirst({
           where: {
             id: input.concertId,
-            status: { in: PUBLIC_SALE_STATUSES },
+            status: { in: PUBLIC_CONCERT_STATUSES },
           },
           select: {
             id: true,
@@ -213,11 +221,11 @@ export class OrderHoldService {
         throw new AppError(404, 'ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng.');
       }
 
-      if (PAID_STATUSES.includes(order.status)) {
+      if (PAID_ORDER_STATUSES.includes(order.status)) {
         return { result: 'skipped_paid' as const, orderId: order.id, concertId: order.concertId };
       }
 
-      if (!PENDING_STATUSES.includes(order.status)) {
+      if (!PENDING_ORDER_STATUSES.includes(order.status)) {
         return { result: 'skipped_not_pending' as const, orderId: order.id, concertId: order.concertId };
       }
 
@@ -275,7 +283,7 @@ export class OrderHoldService {
     const cutoff = new Date(Date.now() - getOrderHoldTtlMs());
     const orders = await this.prisma.order.findMany({
       where: {
-        status: { in: PENDING_STATUSES },
+        status: { in: PENDING_ORDER_STATUSES },
         createdAt: { lt: cutoff },
       },
       select: { id: true },
@@ -324,7 +332,7 @@ export class OrderHoldService {
   }
 
   private handleExistingIdempotencyOrder(order: Awaited<ReturnType<OrderHoldService['findOrderByIdempotencyKey']>>, userId: string) {
-    if (!order || order.userId !== userId || ![...PENDING_STATUSES, ...PAID_STATUSES].includes(order.status)) {
+    if (!order || order.userId !== userId || ![...PENDING_ORDER_STATUSES, ...PAID_ORDER_STATUSES].includes(order.status)) {
       throw new AppError(409, 'ORDER_HOLD_DUPLICATED', 'Idempotency-Key đã được sử dụng cho một yêu cầu khác.');
     }
 
@@ -372,9 +380,9 @@ export class OrderHoldService {
           userId,
           concertId,
           OR: [
-            { status: { in: PAID_STATUSES } },
+            { status: { in: PAID_ORDER_STATUSES } },
             {
-              status: { in: PENDING_STATUSES },
+              status: { in: PENDING_ORDER_STATUSES },
               createdAt: { gte: activePendingSince },
             },
           ],
@@ -393,7 +401,7 @@ export class OrderHoldService {
   }) {
     const expiresAt = new Date(order.createdAt.getTime() + getOrderHoldTtlMs());
     const expiresInSeconds = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
-    const isAwaitingPayment = PENDING_STATUSES.includes(order.status);
+    const isAwaitingPayment = PENDING_ORDER_STATUSES.includes(order.status);
 
     return {
       orderId: order.id,

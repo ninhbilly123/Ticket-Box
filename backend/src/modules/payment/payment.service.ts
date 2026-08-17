@@ -6,14 +6,16 @@ import { AppError } from '../../shared/lib/errors';
 import { publishToQueue } from '../../shared/lib/rabbitmq';
 import { invalidateTicketAvailabilityCache } from '../concert/concert-detail-cache';
 import { getOrderHoldTtlMs } from '../order/order-expiration';
+import {
+  PENDING_ORDER_STATUSES,
+  VALID_TICKET_STATUS,
+} from '../../shared/domain/statuses';
 import { PaymentCacheService } from './payment-cache.service';
 import { PaymentCircuitBreakerService } from './payment-circuit-breaker.service';
 import type { PaymentGateway, ProcessedPaymentStatus } from './payment.types';
 import { sortObject, timingSafeStringEqual, VnpayGatewayService } from './vnpay-gateway.service';
 
 export { sortObject };
-
-const PENDING_ORDER_STATUSES: OrderStatus[] = ['pending', 'PENDING'];
 
 @Injectable()
 export class PaymentService {
@@ -320,7 +322,7 @@ export class PaymentService {
             await tx.ticket.update({
               where: { id: ticket.id },
               data: {
-                status: 'valid',
+                status: VALID_TICKET_STATUS,
               },
             });
           }
@@ -332,7 +334,7 @@ export class PaymentService {
                 orderItemId: item.id,
                 userId: order.userId,
                 qrCode: `TICKET-${order.id.slice(0, 8)}-${randomUUID()}`,
-                status: 'valid',
+                status: VALID_TICKET_STATUS,
               },
             });
           }
@@ -473,7 +475,7 @@ export class PaymentService {
   public async handleVNPAYReturn(query: Record<string, unknown>) {
     const result = await this.processVNPAYReturn(query);
     const redirectUrl = this.buildPaymentResultUrl(result.payment?.orderId, result.success);
-    const statusText = result.success ? 'Thanh to?n th?nh c?ng' : 'Thanh to?n ch?a ho?n t?t';
+    const statusText = result.success ? 'Thanh toán thành công' : 'Thanh toán chưa hoàn tất';
 
     return `<!DOCTYPE html>
 <html lang="vi">
@@ -493,8 +495,8 @@ export class PaymentService {
 <body>
   <main>
     <h1>${this.escapeHtml(statusText)}</h1>
-    <p>?ang chuy?n v? TicketBox ?? xem tr?ng th?i ??n h?ng.</p>
-    <p><a href="${this.escapeHtml(redirectUrl)}">M? trang k?t qu? thanh to?n</a></p>
+    <p>Đang chuyển về TicketBox để xem trạng thái đơn hàng.</p>
+    <p><a href="${this.escapeHtml(redirectUrl)}">Mở trang kết quả thanh toán</a></p>
   </main>
 </body>
 </html>`;

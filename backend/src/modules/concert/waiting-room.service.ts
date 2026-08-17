@@ -156,6 +156,27 @@ export class WaitingRoomService {
     }
   }
 
+  public async consumeCheckoutTokenForHold(concertId: string, userId: string, providedToken: string | undefined) {
+    if (!isWaitingRoomEnabled(concertId)) {
+      return;
+    }
+
+    if (!providedToken) {
+      throw new AppError(403, 'NOT_YOUR_TURN', 'Báº¡n chÆ°a tá»›i lÆ°á»£t mua vÃ©.');
+    }
+
+    await this.assertRedisReady();
+
+    const savedToken = await runRedisOperation(() => redisClient.getDel(buildCheckoutTokenKey(concertId, userId)));
+    if (!savedToken) {
+      throw new AppError(403, 'CHECKOUT_TOKEN_EXPIRED', 'Checkout token Ä‘Ã£ háº¿t háº¡n, vui lÃ²ng vÃ o láº¡i hÃ ng chá».');
+    }
+
+    if (savedToken !== providedToken) {
+      throw new AppError(403, 'NOT_YOUR_TURN', 'Báº¡n chÆ°a tá»›i lÆ°á»£t mua vÃ©.');
+    }
+  }
+
   private async assertWaitingRoomAvailable(concertId: string) {
     const concert = await this.prisma.concert.findFirst({
       where: {

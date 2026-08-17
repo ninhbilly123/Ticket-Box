@@ -54,7 +54,7 @@ export const emptyStaffUserForm = {
   email: '',
   fullName: '',
   phone: '',
-  password: 'Password123!',
+  password: '',
 };
 
 export const CONCERT_PAGE_SIZE = 8;
